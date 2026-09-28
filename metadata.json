@@ -1,0 +1,9 @@
+{
+  "name": "Prompt the Lie - Technical Symposium Prompt Engineering Competition",
+  "description": "Can you make AI say what you want? A competitive prompt-engineering arena where participants craft natural language prompts to deceive Gemini's vision recognition without modifying code or images.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
+
