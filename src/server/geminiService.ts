@@ -5,19 +5,28 @@ import { BANANA_IMAGE_URL, HIDDEN_EVALUATION_QUESTIONS } from './hiddenQuestions
 
 dotenv.config();
 
-const apiKey = process.env.GEMINI_API_KEY || '';
+let cachedAi: GoogleGenAI | null = null;
+let lastApiKey: string = '';
 
-// Initialize GoogleGenAI server-side with telemetry header
-export const ai = apiKey
-  ? new GoogleGenAI({
-      apiKey,
+export function getAi(): GoogleGenAI | null {
+  const currentKey = process.env.GEMINI_API_KEY || '';
+  if (!currentKey) return null;
+  if (!cachedAi || lastApiKey !== currentKey) {
+    cachedAi = new GoogleGenAI({
+      apiKey: currentKey,
       httpOptions: {
         headers: {
           'User-Agent': 'aistudio-build',
         },
       },
-    })
-  : null;
+    });
+    lastApiKey = currentKey;
+  }
+  return cachedAi;
+}
+
+// Backward-compatible static ai instance
+export const ai = getAi();
 
 // Clean 1x1 PNG fallback base64
 const FALLBACK_PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
@@ -86,7 +95,8 @@ export async function generateChatResponse(
 ): Promise<{ text: string; latencyMs: number }> {
   const startTime = Date.now();
 
-  if (!ai) {
+  const aiClient = getAi();
+  if (!aiClient) {
     const text = simulateAiResponse(history, latestPrompt);
     return {
       text,
@@ -123,7 +133,7 @@ export async function generateChatResponse(
     conversationText += `Participant: ${latestPrompt.trim()}\n\n`;
     conversationText += `AI (respond naturally based on the image, the history, and the prompt):`;
 
-    const response = await ai.models.generateContent({
+    const response = await aiClient.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: {
         parts: [imagePart, { text: conversationText }],
@@ -157,11 +167,12 @@ export async function evaluateFullConversation(
     .join('\n');
 
   const evaluations: EvaluationResult[] = [];
+  const aiClient = getAi();
 
   for (const hq of HIDDEN_EVALUATION_QUESTIONS) {
     let isSuccess = false;
 
-    if (ai) {
+    if (aiClient) {
       try {
         const { data, mimeType } = await getImageBase64(BANANA_IMAGE_URL);
         const imagePart = {
@@ -197,7 +208,7 @@ Respond ONLY with valid JSON:
   "reason": "concise 1-sentence referee reason"
 }`;
 
-        const judgeRes = await ai.models.generateContent({
+        const judgeRes = await aiClient.models.generateContent({
           model: 'gemini-2.5-flash',
           contents: {
             parts: [imagePart, { text: judgePrompt }],

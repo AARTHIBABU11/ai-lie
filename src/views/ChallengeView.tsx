@@ -65,7 +65,10 @@ export const ChallengeView: React.FC<ChallengeViewProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           participantId: participant.id,
-          prompt: userText
+          prompt: userText,
+          participantName: participant.name,
+          collegeName: participant.college,
+          teamId: participant.teamId
         })
       });
 
@@ -109,7 +112,12 @@ export const ChallengeView: React.FC<ChallengeViewProps> = ({
       const res = await fetch('/api/chat/finish', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ participantId: participant.id })
+        body: JSON.stringify({
+          participantId: participant.id,
+          participantName: participant.name,
+          collegeName: participant.college,
+          teamId: participant.teamId
+        })
       });
 
       const data = await res.json();
