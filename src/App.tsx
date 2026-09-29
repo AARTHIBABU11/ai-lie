@@ -9,7 +9,7 @@ import { ChallengeView } from './views/ChallengeView';
 import { ResultView } from './views/ResultView';
 import { LeaderboardView } from './views/LeaderboardView';
 import { AdminView } from './views/AdminView';
-import { PublicChallenge, SubmissionResult } from './types';
+import { GameSession } from './types';
 import {
   Participant,
   getStoredParticipant,
@@ -24,10 +24,7 @@ import { User, School, Hash, X, Save } from 'lucide-react';
 export default function App() {
   const [currentView, setCurrentView] = useState<string>('home');
   const [participant, setParticipant] = useState<Participant | null>(null);
-  const [challenges, setChallenges] = useState<PublicChallenge[]>([]);
-  const [loadingChallenges, setLoadingChallenges] = useState<boolean>(true);
-  const [selectedChallenge, setSelectedChallenge] = useState<PublicChallenge | null>(null);
-  const [lastResult, setLastResult] = useState<SubmissionResult | null>(null);
+  const [session, setSession] = useState<GameSession | null>(null);
 
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
   const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
@@ -45,27 +42,32 @@ export default function App() {
       setEditName(p.name);
       setEditCollege(p.college);
       setEditTeamId(p.teamId || '');
+      initSession(p);
     }
 
     const soundPref = getSoundPreference();
     setSoundEnabled(soundPref);
     soundFX.toggleSound(soundPref);
-
-    fetchChallenges();
   }, []);
 
-  const fetchChallenges = async () => {
-    setLoadingChallenges(true);
+  const initSession = async (p: Participant) => {
     try {
-      const res = await fetch('/api/challenges');
+      const res = await fetch('/api/chat/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          participantId: p.id,
+          name: p.name,
+          college: p.college,
+          teamId: p.teamId
+        })
+      });
       if (res.ok) {
         const data = await res.json();
-        setChallenges(data.challenges || []);
+        setSession(data.session);
       }
     } catch (e) {
-      console.error('Failed to fetch challenges:', e);
-    } finally {
-      setLoadingChallenges(false);
+      console.error('Failed to init session', e);
     }
   };
 
@@ -79,21 +81,39 @@ export default function App() {
 
   const handleStartArena = () => {
     soundFX.playClick();
-    setCurrentView('arena');
+    if (participant && session) {
+      if (session.isFinished) {
+        setCurrentView('result');
+      } else {
+        setCurrentView('challenge');
+      }
+    } else {
+      setCurrentView('arena');
+    }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleSelectChallenge = (c: PublicChallenge) => {
-    soundFX.playClick();
-    setSelectedChallenge(c);
-    setCurrentView('challenge');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  const handleSubmitSuccess = (result: SubmissionResult) => {
-    setLastResult(result);
+  const handleFinishGame = (finalSession: GameSession) => {
+    setSession(finalSession);
     setCurrentView('result');
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handlePlayAgain = async () => {
+    if (!participant) return;
+    try {
+      const newParticipant: Participant = {
+        ...participant,
+        id: `user-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`
+      };
+      saveParticipant(newParticipant);
+      setParticipant(newParticipant);
+      await initSession(newParticipant);
+      setCurrentView('challenge');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (e) {
+      console.error('Failed to restart', e);
+    }
   };
 
   const handleSaveProfile = (e: React.FormEvent) => {
@@ -110,6 +130,7 @@ export default function App() {
 
     saveParticipant(updated);
     setParticipant(updated);
+    initSession(updated);
     setShowProfileModal(false);
     soundFX.playSuccess();
   };
@@ -117,6 +138,7 @@ export default function App() {
   const handleSwitchParticipant = () => {
     clearParticipant();
     setParticipant(null);
+    setSession(null);
     setShowProfileModal(false);
     setCurrentView('arena');
   };
@@ -166,44 +188,36 @@ export default function App() {
         {currentView === 'arena' && (
           <ParticipantView
             participant={participant}
-            onSaveParticipant={(p) => setParticipant(p)}
-            onSelectChallenge={handleSelectChallenge}
-            challenges={challenges}
-            loading={loadingChallenges}
+            session={session}
+            onSaveParticipant={(p) => {
+              setParticipant(p);
+              initSession(p);
+            }}
+            onStartArena={handleStartArena}
           />
         )}
 
-        {currentView === 'challenge' && selectedChallenge && participant && (
+        {currentView === 'challenge' && participant && session && (
           <ChallengeView
-            challenge={selectedChallenge}
             participant={participant}
+            session={session}
+            onUpdateSession={(updated) => setSession(updated)}
+            onFinishGame={handleFinishGame}
             onExit={() => {
               soundFX.playClick();
               setCurrentView('arena');
             }}
-            onSubmitSuccess={handleSubmitSuccess}
           />
         )}
 
-        {currentView === 'result' && lastResult && (
+        {currentView === 'result' && session && (
           <ResultView
-            result={lastResult}
-            onNavigateArena={() => {
-              setCurrentView('arena');
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
+            session={session}
             onNavigateLeaderboard={() => {
               setCurrentView('leaderboard');
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
-            onRetryChallenge={() => {
-              if (selectedChallenge) {
-                setCurrentView('challenge');
-              } else {
-                setCurrentView('arena');
-              }
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
+            onPlayAgain={handlePlayAgain}
           />
         )}
 

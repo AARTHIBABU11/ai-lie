@@ -57,14 +57,14 @@ export const Navbar: React.FC<NavbarProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-display font-black tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-amber-400 via-pink-400 to-purple-400 text-lg sm:text-xl">
-                  PROMPT THE LIE
+                  PROMPT ONLY — MAKE AI LIE
                 </span>
                 <span className="hidden sm:inline-block text-[10px] font-mono tracking-widest px-2 py-0.5 rounded-full bg-purple-900/60 text-purple-300 border border-purple-700/50">
-                  TECHFEST 2026
+                  🍌 BANANA ARENA
                 </span>
               </div>
               <p className="text-[10px] text-slate-400 font-mono tracking-tight hidden md:block">
-                CAN YOU MAKE AI SAY WHAT YOU WANT?
+                ONE BANANA IMAGE • ONE CHAT • 15 PROMPTS MAXIMUM
               </p>
             </div>
           </div>

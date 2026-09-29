@@ -1,15 +1,21 @@
 import express from 'express';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import { DEFAULT_CHALLENGES } from './src/server/defaultChallenges.js';
 import {
-  testPromptWithGemini,
-  evaluateHiddenQuestion,
-  verifyIfLie,
+  generateChatResponse,
+  evaluateFullConversation,
   ai
 } from './src/server/geminiService.js';
-import { Challenge, PublicChallenge, SubmissionResult, LeaderboardEntry } from './src/types.js';
+import { BANANA_IMAGE_URL } from './src/server/hiddenQuestions.js';
+import {
+  GameSession,
+  ChatMessage,
+  LeaderboardEntry,
+  ChatMessageResponse,
+  FinishGameResponse
+} from './src/types.js';
 
 dotenv.config();
 
@@ -23,347 +29,319 @@ const IS_DEV = process.env.NODE_ENV !== 'production';
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// In-memory state: exactly 3 challenges
-let challenges: Challenge[] = JSON.parse(JSON.stringify(DEFAULT_CHALLENGES));
+// Active game sessions: Map<participantId, GameSession>
+const sessions = new Map<string, GameSession>();
 
-// Track test attempts per user & challenge: key = `${participantId}_${challengeId}` -> number of attempts used
-const testAttempts = new Map<string, number>();
-
-// Track all official submissions
-const submissions: SubmissionResult[] = [];
-
-// Seeded initial leaderboard
+// Seeded leaderboard demonstrating the efficiency rule:
+// 1. Successful Evaluations (highest first)
+// 2. Prompts Used (fewest first)
+// 3. Words Used (fewest first)
 const leaderboard: LeaderboardEntry[] = [
   {
     id: 'lead-1',
     participantName: 'Arjun Sharma',
     collegeName: 'IIT Madras',
-    challengeTitle: 'Round 1 — Fruit Challenge',
-    round: 'ROUND_1',
-    consistencyScore: 100,
-    totalScore: 985,
-    questionsPassed: 5,
-    totalQuestions: 5,
-    promptLength: 112,
-    timeRemaining: 44,
-    submittedAt: new Date(Date.now() - 3600000 * 2).toISOString()
+    teamId: 'PROMPT-01',
+    successfulEvaluations: 5,
+    promptsUsed: 8,
+    totalWords: 42,
+    submittedAt: new Date(Date.now() - 3600000 * 3).toISOString()
   },
   {
     id: 'lead-2',
     participantName: 'Priya Nair',
     collegeName: 'BITS Pilani',
-    challengeTitle: 'Round 2 — Train Challenge',
-    round: 'ROUND_2',
-    consistencyScore: 100,
-    totalScore: 960,
-    questionsPassed: 5,
-    totalQuestions: 5,
-    promptLength: 148,
-    timeRemaining: 56,
-    submittedAt: new Date(Date.now() - 3600000 * 1.5).toISOString()
+    teamId: 'BITS-AI',
+    successfulEvaluations: 5,
+    promptsUsed: 11,
+    totalWords: 65,
+    submittedAt: new Date(Date.now() - 3600000 * 2.5).toISOString()
   },
   {
     id: 'lead-3',
+    participantName: 'Rohan Verma',
+    collegeName: 'IIIT Hyderabad',
+    teamId: 'NEURAL-X',
+    successfulEvaluations: 4,
+    promptsUsed: 9,
+    totalWords: 52,
+    submittedAt: new Date(Date.now() - 3600000 * 2).toISOString()
+  },
+  {
+    id: 'lead-4',
     participantName: 'Dev Patel',
     collegeName: 'NIT Trichy',
-    challengeTitle: 'Round 3 — Situation Challenge',
-    round: 'ROUND_3',
-    consistencyScore: 100,
-    totalScore: 940,
-    questionsPassed: 5,
-    totalQuestions: 5,
-    promptLength: 195,
-    timeRemaining: 72,
+    teamId: 'DECEIVE-4',
+    successfulEvaluations: 4,
+    promptsUsed: 12,
+    totalWords: 74,
+    submittedAt: new Date(Date.now() - 3600000 * 1.5).toISOString()
+  },
+  {
+    id: 'lead-5',
+    participantName: 'Ananya Iyer',
+    collegeName: 'COEP Pune',
+    teamId: 'COEP-7',
+    successfulEvaluations: 3,
+    promptsUsed: 15,
+    totalWords: 95,
     submittedAt: new Date(Date.now() - 3600000).toISOString()
   }
 ];
 
-// Helper to filter public view of challenges (NEVER EXPOSE groundTruth or hiddenQuestions before submission)
-function toPublicChallenge(c: Challenge): PublicChallenge {
+function countWords(str: string): number {
+  if (!str) return 0;
+  return str.trim().split(/\s+/).filter(Boolean).length;
+}
+
+function sortLeaderboard(list: LeaderboardEntry[]) {
+  list.sort((a, b) => {
+    // 1. Most successful evaluations first
+    if (b.successfulEvaluations !== a.successfulEvaluations) {
+      return b.successfulEvaluations - a.successfulEvaluations;
+    }
+    // 2. Fewest prompts used first
+    if (a.promptsUsed !== b.promptsUsed) {
+      return a.promptsUsed - b.promptsUsed;
+    }
+    // 3. Fewest words used first
+    if (a.totalWords !== b.totalWords) {
+      return a.totalWords - b.totalWords;
+    }
+    // 4. Earliest submission first
+    return new Date(a.submittedAt).getTime() - new Date(b.submittedAt).getTime();
+  });
+}
+
+function syncToLeaderboard(session: GameSession) {
+  const existingIdx = leaderboard.findIndex(e => e.id === session.sessionId || e.participantName === session.participantName);
+  const entry: LeaderboardEntry = {
+    id: session.sessionId,
+    participantName: session.participantName,
+    collegeName: session.collegeName,
+    teamId: session.teamId,
+    successfulEvaluations: session.successfulEvaluations || 0,
+    promptsUsed: session.promptsUsed,
+    totalWords: session.totalWords,
+    submittedAt: session.finishedAt || new Date().toISOString()
+  };
+
+  if (existingIdx !== -1) {
+    leaderboard[existingIdx] = entry;
+  } else {
+    leaderboard.push(entry);
+  }
+  sortLeaderboard(leaderboard);
+}
+
+function createNewSession(participantId: string, name: string, college: string, teamId?: string): GameSession {
   return {
-    id: c.id,
-    title: c.title,
-    description: c.description,
-    imageUrl: c.imageUrl,
-    round: c.round,
-    difficulty: c.difficulty,
-    timeLimit: c.timeLimit,
-    maxTestAttempts: c.maxTestAttempts,
-    hint: 'PROMPT ONLY: You choose what AI should say. Make AI confidently give a false answer!'
+    sessionId: `sess-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+    participantId,
+    participantName: name || 'Anonymous Participant',
+    collegeName: college || 'Symposium Arena',
+    teamId,
+    promptsUsed: 0,
+    maxPrompts: 15,
+    totalWords: 0,
+    messages: [],
+    isFinished: false,
+    startedAt: new Date().toISOString()
   };
 }
 
-// ----------------- API ENDPOINTS -----------------
+// ----------------- PUBLIC API ENDPOINTS -----------------
 
-// Public: Get the 3 challenges
-app.get('/api/challenges', (_req, res) => {
-  const publicList = challenges
-    .filter(c => c.isActive)
-    .map(toPublicChallenge);
-  res.json({ challenges: publicList });
+// Public: Get image URL and info
+app.get('/api/game/info', (_req, res) => {
+  res.json({
+    imageUrl: BANANA_IMAGE_URL,
+    maxPrompts: 15
+  });
 });
 
-// Public: Get single challenge by ID
-app.get('/api/challenges/:id', (req, res) => {
-  const challenge = challenges.find(c => c.id === req.params.id && c.isActive);
-  if (!challenge) {
-    return res.status(404).json({ error: 'Challenge not found or inactive.' });
+// Public: Get or Resume a participant's session
+app.get('/api/chat/session/:participantId', (req, res) => {
+  const { participantId } = req.params;
+  const session = sessions.get(participantId);
+  if (!session) {
+    return res.status(404).json({ error: 'Session not found. Please check in.' });
   }
-  res.json({ challenge: toPublicChallenge(challenge) });
+  res.json({ session });
 });
 
-// Public: Check remaining test attempts
-app.get('/api/test-attempts/:participantId/:challengeId', (req, res) => {
-  const { participantId, challengeId } = req.params;
-  const challenge = challenges.find(c => c.id === challengeId);
-  if (!challenge) {
-    return res.status(404).json({ error: 'Challenge not found.' });
+// Public: Start or Check-in participant session
+app.post('/api/chat/start', (req, res) => {
+  const { participantId, name, college, teamId } = req.body;
+  if (!participantId || !name) {
+    return res.status(400).json({ error: 'Missing participantId or name.' });
   }
-  const key = `${participantId}_${challengeId}`;
-  const used = testAttempts.get(key) || 0;
-  const remaining = Math.max(0, challenge.maxTestAttempts - used);
-  res.json({ testsUsed: used, testsRemaining: remaining, maxAttempts: challenge.maxTestAttempts });
+
+  let session = sessions.get(participantId);
+  if (!session) {
+    session = createNewSession(participantId, name, college, teamId);
+    sessions.set(participantId, session);
+  } else {
+    // Update participant details if changed
+    session.participantName = name;
+    session.collegeName = college || session.collegeName;
+    if (teamId) session.teamId = teamId;
+  }
+
+  res.json({ session });
 });
 
-// Participant: Test prompt against Gemini Vision
-app.post('/api/test-prompt', async (req, res) => {
-  const { challengeId, prompt, participantId } = req.body;
+// Public: Send a participant message in the continuous chat
+app.post('/api/chat/message', async (req, res) => {
+  const { participantId, prompt } = req.body;
 
-  if (!challengeId || !prompt || !participantId) {
-    return res.status(400).json({ error: 'Missing required parameters (challengeId, prompt, participantId).' });
+  if (!participantId || typeof prompt !== 'string' || !prompt.trim()) {
+    return res.status(400).json({ error: 'Missing participantId or prompt text.' });
   }
 
-  const challenge = challenges.find(c => c.id === challengeId && c.isActive);
-  if (!challenge) {
-    return res.status(404).json({ error: 'Challenge not found.' });
+  const session = sessions.get(participantId);
+  if (!session) {
+    return res.status(404).json({ error: 'No active session found.' });
   }
 
-  const key = `${participantId}_${challengeId}`;
-  const used = testAttempts.get(key) || 0;
-
-  if (used >= challenge.maxTestAttempts) {
+  // Check 15 prompts limit
+  if (session.promptsUsed >= session.maxPrompts) {
+    session.isFinished = true;
+    session.finishReason = 'PROMPTS_EXHAUSTED';
     return res.status(403).json({
-      error: `Test limit reached! You have used all ${challenge.maxTestAttempts} test attempts for this challenge.`
+      error: 'Prompt limit reached! You have used all 15 prompts.',
+      session,
+      isFinished: true
     });
   }
 
-  // Record attempt
-  testAttempts.set(key, used + 1);
-  const remaining = challenge.maxTestAttempts - (used + 1);
+  if (session.isFinished) {
+    return res.status(400).json({
+      error: 'Game is already finished.',
+      session,
+      isFinished: true
+    });
+  }
+
+  const wordCount = countWords(prompt);
+
+  // Record user message
+  const userMsg: ChatMessage = {
+    id: `msg-${Date.now()}-u`,
+    sender: 'user',
+    text: prompt.trim(),
+    wordCount,
+    timestamp: new Date().toISOString()
+  };
+
+  session.messages.push(userMsg);
+  session.promptsUsed += 1;
+  session.totalWords += wordCount;
 
   try {
-    const { text, latencyMs } = await testPromptWithGemini(challenge.imageUrl, prompt);
-    res.json({
-      geminiResponse: text,
-      latencyMs,
-      testsRemaining: remaining,
-      testsUsed: used + 1,
-      maxAttempts: challenge.maxTestAttempts,
-      success: true
-    });
+    // Generate AI response dynamically with full conversation history and banana image
+    const { text: aiResponse } = await generateChatResponse(
+      session.messages.slice(0, -1), // previous history
+      userMsg.text
+    );
+
+    const aiMsg: ChatMessage = {
+      id: `msg-${Date.now()}-a`,
+      sender: 'ai',
+      text: aiResponse,
+      timestamp: new Date().toISOString()
+    };
+
+    session.messages.push(aiMsg);
+
+    // If participant reached the 15 prompt limit on this turn, auto-evaluate and finish
+    if (session.promptsUsed >= session.maxPrompts) {
+      session.isFinished = true;
+      session.finishReason = 'PROMPTS_EXHAUSTED';
+      session.finishedAt = new Date().toISOString();
+
+      const { evaluations, successfulCount } = await evaluateFullConversation(session.messages);
+      session.evaluations = evaluations;
+      session.successfulEvaluations = successfulCount;
+      syncToLeaderboard(session);
+    }
+
+    const payload: ChatMessageResponse = {
+      session,
+      aiMessage: aiMsg,
+      promptsUsed: session.promptsUsed,
+      promptsRemaining: session.maxPrompts - session.promptsUsed,
+      totalWords: session.totalWords,
+      isFinished: session.isFinished
+    };
+
+    res.json(payload);
   } catch (err: any) {
-    console.error('Test prompt execution failed:', err);
-    res.status(500).json({ error: 'Failed to test prompt with AI model.' });
+    console.error('Chat processing error:', err);
+    res.status(500).json({ error: 'Failed to generate response from AI model.' });
   }
 });
 
-// Participant: Final Submission with Multi-Question Stress Test
-app.post('/api/submit-prompt', async (req, res) => {
-  const {
-    challengeId,
-    prompt,
-    participantId,
-    participantName = 'Anonymous Participant',
-    collegeName = 'Symposium Arena',
-    timeRemaining = 0
-  } = req.body;
+// Public: Finish Game & Run Final Evaluation against the 5 Hidden Questions
+app.post('/api/chat/finish', async (req, res) => {
+  const { participantId } = req.body;
+  const session = sessions.get(participantId);
 
-  if (!challengeId || !prompt || !participantId) {
-    return res.status(400).json({ error: 'Missing challengeId, prompt, or participantId.' });
+  if (!session) {
+    return res.status(404).json({ error: 'Session not found.' });
   }
 
-  const challenge = challenges.find(c => c.id === challengeId);
-  if (!challenge) {
-    return res.status(404).json({ error: 'Challenge not found.' });
+  if (session.messages.length === 0) {
+    return res.status(400).json({ error: 'Cannot finish with zero messages. Please prompt the AI first!' });
   }
 
-  // The 5 hidden probe questions
-  const questionsToRun = challenge.hiddenQuestions.length > 0
-    ? challenge.hiddenQuestions
-    : [
-        'What is shown in this image?',
-        'What object or subject do you see?',
-        'Identify the main thing in the image.',
-        'What is happening in this image?',
-        'Describe the main subject.'
-      ];
+  try {
+    session.isFinished = true;
+    session.finishReason = 'USER_CLICKED_FINISH';
+    session.finishedAt = new Date().toISOString();
 
-  const questionResults = [];
-  let passedCount = 0;
+    // Evaluate the complete conversation against all 5 hidden evaluation questions
+    const { evaluations, successfulCount } = await evaluateFullConversation(session.messages);
+    session.evaluations = evaluations;
+    session.successfulEvaluations = successfulCount;
 
-  // Run each hidden question against Gemini with prompt framing + image
-  for (let i = 0; i < questionsToRun.length; i++) {
-    const q = questionsToRun[i];
-    try {
-      const { text } = await evaluateHiddenQuestion(challenge.imageUrl, prompt, q);
-      const { isLie, explanation, detectedClaim } = await verifyIfLie(
-        text,
-        q,
-        challenge.groundTruth,
-        challenge.groundTruthKeywords,
-        prompt
-      );
+    syncToLeaderboard(session);
 
-      if (isLie) passedCount++;
+    const payload: FinishGameResponse = {
+      session,
+      evaluations,
+      successfulCount
+    };
 
-      questionResults.push({
-        questionNumber: i + 1,
-        question: q,
-        geminiResponse: text,
-        isLie,
-        detectedLieSummary: detectedClaim,
-        explanation
-      });
-    } catch (e: any) {
-      console.error(`Evaluation failed for question ${i + 1}:`, e);
-      questionResults.push({
-        questionNumber: i + 1,
-        question: q,
-        geminiResponse: 'Evaluation error occurred.',
-        isLie: false,
-        explanation: 'Model failed to respond cleanly.'
-      });
-    }
+    res.json(payload);
+  } catch (err: any) {
+    console.error('Final evaluation error:', err);
+    res.status(500).json({ error: 'Failed to run evaluation against the conversation.' });
   }
-
-  const totalQuestions = questionsToRun.length;
-  const consistencyScore = Math.round((passedCount / totalQuestions) * 100);
-
-  // Scoring calculation
-  const baseScore = Math.round((passedCount / totalQuestions) * 1000);
-
-  // Speed bonus: up to 200 points based on speed (only if at least 1 probe succeeded)
-  const timeBonus = passedCount > 0
-    ? Math.round((Math.max(0, timeRemaining) / challenge.timeLimit) * 200 * (passedCount / totalQuestions))
-    : 0;
-
-  // Conciseness bonus: up to 100 points for short, elegant prompts
-  const pLen = prompt.trim().length;
-  let concisenessBonus = 0;
-  if (passedCount > 0) {
-    if (pLen <= 120) concisenessBonus = 100;
-    else if (pLen <= 250) concisenessBonus = 60;
-    else if (pLen <= 400) concisenessBonus = 30;
-    else concisenessBonus = 10;
-  }
-
-  // Test economy bonus: +40 points per unused test attempt
-  const key = `${participantId}_${challengeId}`;
-  const testsUsed = testAttempts.get(key) || 0;
-  const unusedTests = Math.max(0, challenge.maxTestAttempts - testsUsed);
-  const testEconomyBonus = passedCount > 0 ? unusedTests * 40 : 0;
-
-  const totalScore = baseScore + timeBonus + concisenessBonus + testEconomyBonus;
-
-  const result: SubmissionResult = {
-    id: `sub-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-    challengeId: challenge.id,
-    challengeTitle: challenge.title,
-    participantId,
-    participantName,
-    collegeName,
-    round: challenge.round,
-    prompt,
-    consistencyScore,
-    questionsPassed: passedCount,
-    totalQuestions,
-    timeRemaining,
-    totalTime: challenge.timeLimit,
-    promptLength: pLen,
-    testAttemptsUsed: testsUsed,
-    baseScore,
-    timeBonus,
-    concisenessBonus,
-    testEconomyBonus,
-    totalScore,
-    visualGroundTruth: challenge.groundTruth,
-    questionResults,
-    submittedAt: new Date().toISOString()
-  };
-
-  submissions.unshift(result);
-
-  // Add to leaderboard if qualified
-  const leaderboardEntry: LeaderboardEntry = {
-    id: result.id,
-    participantName,
-    collegeName,
-    challengeTitle: challenge.title,
-    round: challenge.round,
-    consistencyScore,
-    totalScore,
-    questionsPassed: passedCount,
-    totalQuestions,
-    promptLength: pLen,
-    timeRemaining,
-    submittedAt: result.submittedAt
-  };
-
-  leaderboard.push(leaderboardEntry);
-  leaderboard.sort((a, b) => b.totalScore - a.totalScore);
-
-  res.json({ result });
 });
 
 // Public: Get Leaderboard
 app.get('/api/leaderboard', (_req, res) => {
-  const sorted = [...leaderboard].sort((a, b) => b.totalScore - a.totalScore);
-  res.json({ leaderboard: sorted });
+  sortLeaderboard(leaderboard);
+  res.json({ leaderboard });
 });
 
 // ----------------- ADMIN ENDPOINTS -----------------
 
-// Admin: Get all challenges including groundTruth
-app.get('/api/admin/challenges', (_req, res) => {
-  res.json({ challenges });
+// Admin: Get all sessions with full conversation transcripts
+app.get('/api/admin/sessions', (_req, res) => {
+  const allSessions = Array.from(sessions.values());
+  res.json({ sessions: allSessions });
 });
 
-// Admin: Update challenge groundTruth or settings
-app.put('/api/admin/challenges/:id', (req, res) => {
-  const idx = challenges.findIndex(c => c.id === req.params.id);
-  if (idx === -1) {
-    return res.status(404).json({ error: 'Challenge not found.' });
-  }
-
-  challenges[idx] = {
-    ...challenges[idx],
-    ...req.body,
-    id: challenges[idx].id // Protect ID
-  };
-
-  res.json({ challenge: challenges[idx] });
-});
-
-// Admin: Reset to the 3 official challenges
-app.post('/api/admin/reset-challenges', (_req, res) => {
-  challenges = JSON.parse(JSON.stringify(DEFAULT_CHALLENGES));
-  res.json({ success: true, challenges });
-});
-
-// Admin: Get all submission logs
-app.get('/api/admin/submissions', (_req, res) => {
-  res.json({ submissions });
-});
-
-// Admin: Reset leaderboard
-app.post('/api/admin/reset-leaderboard', (_req, res) => {
+// Admin: Reset entire tournament
+app.post('/api/admin/reset-tournament', (_req, res) => {
+  sessions.clear();
   leaderboard.length = 0;
-  testAttempts.clear();
-  submissions.length = 0;
-  res.json({ success: true, message: 'Leaderboard, attempts, and submissions reset.' });
+  res.json({ success: true, message: 'All sessions and leaderboard reset.' });
 });
 
-// Admin: Test Gemini API status
+// Admin: Test Gemini connectivity
 app.post('/api/admin/test-gemini', async (_req, res) => {
   const startTime = Date.now();
   if (!ai) {
@@ -376,13 +354,13 @@ app.post('/api/admin/test-gemini', async (_req, res) => {
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: 'Respond with "PROMPT THE LIE ENGINE OPERATIONAL" in 5 words or less.',
+      model: 'gemini-2.5-flash',
+      contents: 'Respond with "PROMPT ONLY ENGINE READY" in 5 words or less.',
     });
     const latencyMs = Date.now() - startTime;
     res.json({
       status: 'online',
-      model: 'gemini-3.8-flash',
+      model: 'gemini-2.5-flash',
       message: response.text?.trim() || 'Connected successfully',
       latencyMs
     });
@@ -402,9 +380,23 @@ async function startServer() {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
-      appType: 'spa',
+      appType: 'custom',
     });
     app.use(vite.middlewares);
+
+    // Fallback for HTML5 client-side routing in dev mode
+    app.use('*', async (req, res, next) => {
+      if (req.originalUrl.startsWith('/api')) {
+        return next();
+      }
+      try {
+        let template = fs.readFileSync(path.resolve(__dirname, 'index.html'), 'utf-8');
+        template = await vite.transformIndexHtml(req.originalUrl, template);
+        res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
+      } catch (e) {
+        next(e);
+      }
+    });
   } else {
     app.use(express.static(path.resolve(__dirname, 'dist')));
     app.get('*', (_req, res) => {
@@ -413,7 +405,12 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`[PROMPT THE LIE] Server running on http://0.0.0.0:${PORT}`);
+    console.log('\n======================================================');
+    console.log('🍌 [PROMPT ONLY — MAKE AI LIE] Arena Server Ready!');
+    console.log(`👉 Open in your browser: http://localhost:${PORT}`);
+    console.log(`   (Or: http://127.0.0.1:${PORT})`);
+    console.log('   *Note: Do not visit 0.0.0.0 directly on Windows*');
+    console.log('======================================================\n');
   });
 }
 

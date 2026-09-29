@@ -15,7 +15,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
               <Zap className="w-4 h-4 text-white" />
             </div>
             <span className="font-display font-bold text-white tracking-wider text-base">
-              PROMPT THE LIE
+              PROMPT ONLY — MAKE AI LIE
             </span>
           </div>
           <p className="text-xs text-slate-400 leading-relaxed max-w-md">
