@@ -117,8 +117,8 @@ export const HomeView: React.FC<HomeViewProps> = ({ onNavigate, onStartArena }) 
               <div className="text-xs text-slate-400 font-mono uppercase mt-1">Total Game Budget</div>
             </div>
             <div className="p-4 rounded-xl bg-slate-900/70 border border-slate-800 backdrop-blur-sm">
-              <div className="text-2xl sm:text-3xl font-black text-emerald-400 font-display">5 Evaluations</div>
-              <div className="text-xs text-slate-400 font-mono uppercase mt-1">Judged at the End</div>
+              <div className="text-2xl sm:text-3xl font-black text-emerald-400 font-display">500 Pts</div>
+              <div className="text-xs text-slate-400 font-mono uppercase mt-1">Exact Maximum Score</div>
             </div>
           </div>
         </div>
@@ -135,7 +135,7 @@ export const HomeView: React.FC<HomeViewProps> = ({ onNavigate, onStartArena }) 
             Pure Prompt Engineering. No Gimmicks.
           </h2>
           <p className="text-slate-400 text-xs sm:text-sm max-w-xl mx-auto">
-            You converse with Gemini about the banana image. The conversation flows naturally across up to 15 turns.
+            You converse with Gemini about the banana image. Everything happens in one continuous conversation.
           </p>
         </div>
 
@@ -144,9 +144,9 @@ export const HomeView: React.FC<HomeViewProps> = ({ onNavigate, onStartArena }) 
             <div className="w-10 h-10 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 font-bold font-mono text-lg">
               1
             </div>
-            <h3 className="text-base font-bold text-white">One Banana Image & One Chat</h3>
+            <h3 className="text-base font-bold text-white">Convince the Chatbot</h3>
             <p className="text-xs text-slate-400 leading-relaxed">
-              You see the banana image and a single chat box. There are no rounds, no question screens, and no resets. Every prompt you send sees the previous conversation history.
+              You converse directly with an AI chatbot looking at the banana image. Your objective is to convince it to accept any false claim of your choice using pure prompt engineering.
             </p>
           </div>
 
@@ -154,9 +154,9 @@ export const HomeView: React.FC<HomeViewProps> = ({ onNavigate, onStartArena }) 
             <div className="w-10 h-10 rounded-2xl bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center text-cyan-400 font-bold font-mono text-lg">
               2
             </div>
-            <h3 className="text-base font-bold text-white">15 Total Prompts Budget</h3>
+            <h3 className="text-base font-bold text-white">Natural Intelligent Dialogue</h3>
             <p className="text-xs text-slate-400 leading-relaxed">
-              You can send a maximum of 15 prompts. Use roleplay, scientific framing, sensory recontextualization, or any prompt-engineering strategy to persuade the model.
+              The AI behaves like a real chatbot. It is initially resistant, challenges weak arguments, and debates your premises. It only changes its position when your reasoning is genuinely convincing.
             </p>
           </div>
 
@@ -164,16 +164,16 @@ export const HomeView: React.FC<HomeViewProps> = ({ onNavigate, onStartArena }) 
             <div className="w-10 h-10 rounded-2xl bg-purple-500/20 border border-purple-500/40 flex items-center justify-center text-purple-400 font-bold font-mono text-lg">
               3
             </div>
-            <h3 className="text-base font-bold text-white">5 Hidden Evaluations At Finish</h3>
+            <h3 className="text-base font-bold text-white">5 Hidden Evaluations</h3>
             <p className="text-xs text-slate-400 leading-relaxed">
-              When you click [FINISH] or reach 15 prompts, Gemini evaluates the entire conversation against 5 hidden questions testing different aspects of the image to see if it contradicted visual truth.
+              When you finish, your conversation is evaluated against 5 hidden referee questions (100 pts each). Passing all 5 awards exactly 500 points.
             </p>
           </div>
         </div>
       </section>
 
       {/* Transparent Leaderboard Scoring */}
-      <section className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+      <section className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="p-8 sm:p-10 rounded-3xl bg-slate-900/90 border border-slate-800 space-y-6">
           <div className="space-y-2">
             <div className="inline-flex items-center gap-2 text-xs font-mono text-cyan-400 uppercase tracking-widest font-semibold">
@@ -181,32 +181,46 @@ export const HomeView: React.FC<HomeViewProps> = ({ onNavigate, onStartArena }) 
               OFFICIAL RANKING ALGORITHM
             </div>
             <h3 className="text-xl sm:text-2xl font-bold text-white">
-              Strict Efficiency Ranking
+              Official Scoring & Leaderboard Priority (Max 500 Pts)
             </h3>
             <p className="text-xs text-slate-400 leading-relaxed">
-              No arbitrary formulas. Standings are ranked strictly by:
+              Every participant starts with score = 0. Exactly 5 hidden evaluations (100 pts each). Strict tie-breaker priority:
             </p>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs font-mono">
+          <div className="grid grid-cols-1 sm:grid-cols-5 gap-3 text-xs font-mono">
             <div className="p-4 rounded-2xl bg-slate-950 border border-amber-500/40 space-y-1">
-              <div className="text-amber-400 font-bold">1. Successful Evaluations</div>
+              <div className="text-amber-400 font-bold">1. SCORE</div>
               <div className="text-[11px] text-slate-400">
-                Primary factor: Highest number of successful evaluations (up to 5/5) ranks first.
+                Highest first. 100 pts per passed hidden evaluation (Max 500).
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-950 border border-emerald-500/40 space-y-1">
+              <div className="text-emerald-400 font-bold">2. TIME</div>
+              <div className="text-[11px] text-slate-400">
+                Fastest first. Server-side completion time (speed tie-breaker).
               </div>
             </div>
 
             <div className="p-4 rounded-2xl bg-slate-950 border border-cyan-500/40 space-y-1">
-              <div className="text-cyan-400 font-bold">2. Prompts Used</div>
+              <div className="text-cyan-400 font-bold">3. PROMPTS</div>
               <div className="text-[11px] text-slate-400">
-                Secondary factor: Achieving 5/5 in 8 prompts ranks higher than in 11 prompts.
+                Fewest first. Participant prompt count used before finish.
               </div>
             </div>
 
             <div className="p-4 rounded-2xl bg-slate-950 border border-purple-500/40 space-y-1">
-              <div className="text-purple-300 font-bold">3. Words Used</div>
+              <div className="text-purple-300 font-bold">4. TOKENS</div>
               <div className="text-[11px] text-slate-400">
-                Tie-breaker: If prompts are tied, the participant who used fewer words wins!
+                Fewest first. Participant prompt tokens consumed.
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-950 border border-pink-500/40 space-y-1">
+              <div className="text-pink-300 font-bold">5. WORDS</div>
+              <div className="text-[11px] text-slate-400">
+                Fewest first. Participant prompt words used.
               </div>
             </div>
           </div>

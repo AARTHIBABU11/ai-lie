@@ -1,21 +1,28 @@
 import React, { useState, useEffect } from 'react';
 import {
   Trophy,
-  Award,
   Search,
   RefreshCw,
   Zap,
-  Medal,
   Clock,
-  Sparkles,
-  School,
-  CheckCircle2
+  ShieldCheck,
+  Cpu,
+  FileText
 } from 'lucide-react';
 import { LeaderboardEntry } from '../types';
 import { soundFX } from '../utils/audio';
 
 interface LeaderboardViewProps {
   onStartArena: () => void;
+}
+
+function formatTime(entry: LeaderboardEntry): string {
+  if (entry.formattedTime) return entry.formattedTime;
+  const ms = entry.completionTimeMs ?? ((entry.timeTakenSeconds || 0) * 1000);
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const mins = Math.floor(totalSeconds / 60);
+  const secs = totalSeconds % 60;
+  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
 
 export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ onStartArena }) => {
@@ -65,13 +72,13 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ onStartArena }
         <div className="space-y-1">
           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-950/60 border border-amber-500/40 text-xs font-mono text-amber-300 font-bold mb-1">
             <Trophy className="w-3.5 h-3.5 text-amber-400" />
-            <span>OFFICIAL LEADERBOARD • EFFICIENCY RANKINGS</span>
+            <span>OFFICIAL COMPETITION LEADERBOARD • MAX 500 PTS</span>
           </div>
           <h1 className="text-3xl sm:text-4xl font-black text-white font-display">
             Competition Standings
           </h1>
           <p className="text-xs text-slate-400 font-mono">
-            Ranked strictly by: <strong className="text-amber-400">1. Successful Evaluations (Highest)</strong> → <strong className="text-cyan-400">2. Prompts Used (Fewest)</strong> → <strong className="text-purple-300">3. Words Used (Fewest)</strong>.
+            Sorted strictly by: <strong className="text-amber-400">1. SCORE (Highest)</strong> → <strong className="text-emerald-400">2. TIME (Fastest)</strong> → <strong className="text-cyan-400">3. PROMPTS (Lowest)</strong> → <strong className="text-purple-300">4. TOKENS (Lowest)</strong> → <strong className="text-pink-300">5. WORDS (Lowest)</strong>.
           </p>
         </div>
 
@@ -112,11 +119,14 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ onStartArena }
               <div className="text-xs text-slate-400 font-mono truncate">
                 {topThree[1].collegeName}
               </div>
-              <div className="text-2xl font-black text-cyan-400 font-display">
-                {topThree[1].successfulEvaluations} / 5
+              <div className="text-2xl sm:text-3xl font-black text-cyan-400 font-display">
+                {topThree[1].score ?? topThree[1].finalScore ?? 0} <span className="text-xs font-normal text-slate-400 font-mono">/ 500</span>
               </div>
               <div className="text-xs font-mono text-slate-300">
-                {topThree[1].promptsUsed} prompts • {topThree[1].totalWords} words
+                {topThree[1].passedEvaluations ?? topThree[1].successfulEvaluations ?? 0}/5 evals • {topThree[1].participantPromptCount ?? topThree[1].promptsUsed} prompts
+              </div>
+              <div className="text-[11px] font-mono text-slate-400">
+                {topThree[1].participantTokenCount ?? topThree[1].totalTokens ?? 0} tokens • {formatTime(topThree[1])}
               </div>
             </div>
           )}
@@ -125,7 +135,7 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ onStartArena }
           {topThree[0] && (
             <div className="order-1 md:order-2 p-6 rounded-3xl bg-gradient-to-b from-amber-950/40 via-slate-900 to-slate-900 border-2 border-amber-500/60 text-center space-y-3 relative shadow-2xl md:-translate-y-2">
               <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-0.5 rounded-full bg-amber-500 text-slate-950 text-[10px] font-black uppercase font-mono tracking-wider shadow-md">
-                👑 1st Place — Highest Efficiency
+                👑 1st Place
               </div>
               <div className="w-12 h-12 rounded-full bg-amber-500/20 border border-amber-500 flex items-center justify-center mx-auto text-amber-400 font-black text-lg font-display">
                 🥇
@@ -136,11 +146,14 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ onStartArena }
               <div className="text-xs text-slate-400 font-mono truncate">
                 {topThree[0].collegeName}
               </div>
-              <div className="text-3xl font-black text-amber-400 font-display">
-                {topThree[0].successfulEvaluations} / 5
+              <div className="text-3xl sm:text-4xl font-black text-amber-400 font-display">
+                {topThree[0].score ?? topThree[0].finalScore ?? 0} <span className="text-xs font-normal text-slate-400 font-mono">/ 500</span>
               </div>
               <div className="text-xs font-mono text-amber-300 font-bold">
-                {topThree[0].promptsUsed} prompts • {topThree[0].totalWords} words
+                {topThree[0].passedEvaluations ?? topThree[0].successfulEvaluations ?? 0}/5 evals • {topThree[0].participantPromptCount ?? topThree[0].promptsUsed} prompts
+              </div>
+              <div className="text-[11px] font-mono text-slate-400">
+                {topThree[0].participantTokenCount ?? topThree[0].totalTokens ?? 0} tokens • {formatTime(topThree[0])}
               </div>
             </div>
           )}
@@ -157,11 +170,14 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ onStartArena }
               <div className="text-xs text-slate-400 font-mono truncate">
                 {topThree[2].collegeName}
               </div>
-              <div className="text-2xl font-black text-cyan-400 font-display">
-                {topThree[2].successfulEvaluations} / 5
+              <div className="text-2xl sm:text-3xl font-black text-cyan-400 font-display">
+                {topThree[2].score ?? topThree[2].finalScore ?? 0} <span className="text-xs font-normal text-slate-400 font-mono">/ 500</span>
               </div>
               <div className="text-xs font-mono text-slate-300">
-                {topThree[2].promptsUsed} prompts • {topThree[2].totalWords} words
+                {topThree[2].passedEvaluations ?? topThree[2].successfulEvaluations ?? 0}/5 evals • {topThree[2].participantPromptCount ?? topThree[2].promptsUsed} prompts
+              </div>
+              <div className="text-[11px] font-mono text-slate-400">
+                {topThree[2].participantTokenCount ?? topThree[2].totalTokens ?? 0} tokens • {formatTime(topThree[2])}
               </div>
             </div>
           )}
@@ -171,7 +187,7 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ onStartArena }
       {/* Search Bar */}
       <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 flex items-center justify-between gap-4">
         <div className="text-xs font-mono text-slate-400 hidden sm:block">
-          Total Participants: <strong className="text-white">{entries.length}</strong>
+          Total Competitors: <strong className="text-white">{entries.length}</strong>
         </div>
 
         <div className="relative w-full sm:w-80">
@@ -186,15 +202,23 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ onStartArena }
         </div>
       </div>
 
-      {/* Rankings Table */}
+      {/* Official Rankings Table: EXACT COLUMNS REQUIRED */}
       <div className="rounded-3xl border border-slate-800 bg-slate-900/90 overflow-hidden shadow-2xl">
         {loading ? (
           <div className="p-12 text-center text-xs font-mono text-slate-500 animate-pulse">
             Fetching standings from competition server...
           </div>
         ) : filtered.length === 0 ? (
-          <div className="p-12 text-center text-xs text-slate-400 font-mono">
-            No entries found.
+          <div className="p-16 text-center space-y-3 font-mono">
+            <div className="w-12 h-12 rounded-2xl bg-slate-800/60 border border-slate-700 flex items-center justify-center mx-auto text-slate-400 text-lg">
+              🏆
+            </div>
+            <div className="text-sm font-bold text-slate-300">
+              No participants yet
+            </div>
+            <p className="text-xs text-slate-500 max-w-sm mx-auto">
+              Standings will appear here as soon as registered participants complete their evaluation.
+            </p>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -203,15 +227,22 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ onStartArena }
                 <tr>
                   <th className="py-3.5 px-4 font-semibold">Rank</th>
                   <th className="py-3.5 px-4 font-semibold">Participant</th>
-                  <th className="py-3.5 px-4 font-semibold">Institution</th>
-                  <th className="py-3.5 px-4 font-semibold text-center">Successful Evaluations</th>
-                  <th className="py-3.5 px-4 font-semibold text-center">Prompts Used</th>
-                  <th className="py-3.5 px-4 font-semibold text-center">Total Words</th>
+                  <th className="py-3.5 px-4 font-semibold text-center">Score</th>
+                  <th className="py-3.5 px-4 font-semibold text-center">Evaluations</th>
+                  <th className="py-3.5 px-4 font-semibold text-center">Prompts</th>
+                  <th className="py-3.5 px-4 font-semibold text-center">Tokens</th>
+                  <th className="py-3.5 px-4 font-semibold text-center">Time</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60">
                 {filtered.map((item, idx) => {
                   const rank = idx + 1;
+                  const score = item.score !== undefined ? item.score : (item.finalScore ?? 0);
+                  const evals = item.passedEvaluations !== undefined ? item.passedEvaluations : (item.successfulEvaluations ?? 0);
+                  const prompts = item.participantPromptCount !== undefined ? item.participantPromptCount : (item.promptsUsed ?? 0);
+                  const tokens = item.participantTokenCount !== undefined ? item.participantTokenCount : (item.totalTokens ?? 0);
+                  const timeFormatted = formatTime(item);
+
                   return (
                     <tr
                       key={item.id}
@@ -219,47 +250,51 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ onStartArena }
                     >
                       <td className="py-3.5 px-4 font-bold">
                         {rank === 1 ? (
-                          <span className="text-amber-400 flex items-center gap-1">🥇 #1</span>
+                          <span className="text-amber-400 flex items-center gap-1 font-bold">🥇 1</span>
                         ) : rank === 2 ? (
-                          <span className="text-slate-300 flex items-center gap-1">🥈 #2</span>
+                          <span className="text-slate-300 flex items-center gap-1 font-bold">🥈 2</span>
                         ) : rank === 3 ? (
-                          <span className="text-amber-600 flex items-center gap-1">🥉 #3</span>
+                          <span className="text-amber-600 flex items-center gap-1 font-bold">🥉 3</span>
                         ) : (
-                          <span className="text-slate-500">#{rank}</span>
+                          <span className="text-slate-500">{rank}</span>
                         )}
                       </td>
 
                       <td className="py-3.5 px-4 font-semibold text-white">
                         <div>{item.participantName}</div>
-                        {item.teamId && (
-                          <div className="text-[10px] text-slate-500 font-normal">[{item.teamId}]</div>
-                        )}
+                        <div className="text-[10px] text-slate-400 font-normal">
+                          {item.collegeName} {item.teamId && `• [${item.teamId}]`}
+                        </div>
                       </td>
 
-                      <td className="py-3.5 px-4 text-slate-400">
-                        {item.collegeName}
+                      <td className="py-3.5 px-4 text-center font-black text-amber-400 text-sm">
+                        {score}
                       </td>
 
                       <td className="py-3.5 px-4 text-center">
                         <span
-                          className={`inline-block px-3 py-1 rounded-full text-xs font-bold ${
-                            item.successfulEvaluations === 5
+                          className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                            evals === 5
                               ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
-                              : item.successfulEvaluations >= 3
+                              : evals >= 3
                               ? 'bg-amber-950 text-amber-400 border border-amber-800'
                               : 'bg-slate-950 text-slate-400 border border-slate-800'
                           }`}
                         >
-                          {item.successfulEvaluations} / 5
+                          {evals}/5
                         </span>
                       </td>
 
                       <td className="py-3.5 px-4 text-center font-bold text-cyan-400">
-                        {item.promptsUsed} <span className="text-slate-500 text-[10px] font-normal">/ 15</span>
+                        {prompts}
                       </td>
 
                       <td className="py-3.5 px-4 text-center font-bold text-purple-300">
-                        {item.totalWords}
+                        {tokens}
+                      </td>
+
+                      <td className="py-3.5 px-4 text-center font-mono text-emerald-400 font-bold">
+                        {timeFormatted}
                       </td>
                     </tr>
                   );

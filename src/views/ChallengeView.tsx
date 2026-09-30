@@ -8,7 +8,12 @@ import {
   MessageSquare,
   AlertTriangle,
   Flame,
-  CheckCircle2
+  CheckCircle2,
+  Clock,
+  Lock,
+  Unlock,
+  Cpu,
+  ShieldAlert
 } from 'lucide-react';
 import { GameSession, ChatMessage } from '../types';
 import { Participant } from '../utils/storage';
@@ -24,6 +29,20 @@ interface ChallengeViewProps {
   onExit: () => void;
 }
 
+function estimateTokensLocal(text: string): number {
+  if (!text || !text.trim()) return 0;
+  const wordsAndPunct = text.trim().match(/[\w']+|[^\w\s]+/g);
+  const baseTokens = wordsAndPunct ? wordsAndPunct.length : 0;
+  const charEstimate = Math.ceil(text.trim().length / 4);
+  return Math.max(baseTokens, charEstimate);
+}
+
+function formatDuration(seconds: number): string {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+}
+
 export const ChallengeView: React.FC<ChallengeViewProps> = ({
   participant,
   session,
@@ -37,11 +56,30 @@ export const ChallengeView: React.FC<ChallengeViewProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [zoomImage, setZoomImage] = useState<boolean>(false);
 
+  // Live timer tracking elapsed time since session.startedAt
+  const [elapsedSeconds, setElapsedSeconds] = useState<number>(() => {
+    if (!session.startedAt) return 0;
+    const diff = Math.floor((Date.now() - new Date(session.startedAt).getTime()) / 1000);
+    return Math.max(0, diff);
+  });
+
   const chatEndRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [session.messages, isSending]);
+
+  // Timer interval
+  useEffect(() => {
+    if (session.isFinished) return;
+    const timer = setInterval(() => {
+      if (session.startedAt) {
+        const diff = Math.floor((Date.now() - new Date(session.startedAt).getTime()) / 1000);
+        setElapsedSeconds(Math.max(0, diff));
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [session.startedAt, session.isFinished]);
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -95,12 +133,13 @@ export const ChallengeView: React.FC<ChallengeViewProps> = ({
   };
 
   const handleFinish = async () => {
-    if (session.messages.length === 0) {
-      setErrorMessage('Please send at least one prompt before finishing.');
+    if (session.promptsUsed < 1) {
+      setErrorMessage('Please send at least 1 prompt before finishing.');
+      soundFX.playFail();
       return;
     }
 
-    if (!confirm('Are you ready to submit your conversation for the final 5-question evaluation?')) {
+    if (!confirm('Are you ready to submit your continuous conversation for the 5 hidden evaluations?')) {
       return;
     }
 
@@ -136,6 +175,8 @@ export const ChallengeView: React.FC<ChallengeViewProps> = ({
   };
 
   const isLimitReached = session.promptsUsed >= 15;
+  const canEvaluate = session.promptsUsed >= 1;
+  const promptTokensPreview = estimateTokensLocal(prompt);
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6 animate-fadeIn">
@@ -190,30 +231,54 @@ export const ChallengeView: React.FC<ChallengeViewProps> = ({
         </div>
       </div>
 
-      {/* 3. Stats Bar: PROMPTS USED & WORDS USED */}
-      <div className="grid grid-cols-2 gap-4 max-w-lg mx-auto font-mono text-center">
+      {/* Live Stats Bar: PROMPTS, TOKENS, TIME, WORDS */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 max-w-3xl mx-auto font-mono text-center">
+        {/* Prompts Used */}
         <div
-          className={`p-3.5 rounded-2xl border transition-all ${
+          className={`p-3 rounded-2xl border transition-all ${
             isLimitReached
               ? 'bg-rose-950/70 border-rose-500 text-rose-300'
               : 'bg-slate-900 border-cyan-500/40 text-cyan-400'
           }`}
         >
           <div className="text-[10px] uppercase text-slate-400">Prompts Used</div>
-          <div className="text-xl sm:text-2xl font-black">
+          <div className="text-lg sm:text-xl font-black">
             {session.promptsUsed} <span className="text-xs font-normal text-slate-500">/ 15</span>
           </div>
         </div>
 
-        <div className="p-3.5 rounded-2xl bg-slate-900 border border-purple-500/40 text-purple-300 text-center">
+        {/* Tokens Used */}
+        <div className="p-3 rounded-2xl bg-slate-900 border border-amber-500/40 text-amber-400 text-center">
+          <div className="text-[10px] uppercase text-slate-400 flex items-center justify-center gap-1">
+            <Cpu className="w-3 h-3 text-amber-400" />
+            <span>Total Tokens</span>
+          </div>
+          <div className="text-lg sm:text-xl font-black">
+            {session.totalTokens || 0}
+          </div>
+        </div>
+
+        {/* Live Elapsed Time */}
+        <div className="p-3 rounded-2xl bg-slate-900 border border-purple-500/40 text-purple-300 text-center">
+          <div className="text-[10px] uppercase text-slate-400 flex items-center justify-center gap-1">
+            <Clock className="w-3 h-3 text-purple-400" />
+            <span>Time Elapsed</span>
+          </div>
+          <div className="text-lg sm:text-xl font-black font-mono">
+            {formatDuration(elapsedSeconds)}
+          </div>
+        </div>
+
+        {/* Total Words */}
+        <div className="p-3 rounded-2xl bg-slate-900 border border-slate-700 text-slate-300 text-center">
           <div className="text-[10px] uppercase text-slate-400">Total Words</div>
-          <div className="text-xl sm:text-2xl font-black">
+          <div className="text-lg sm:text-xl font-black">
             {session.totalWords}
           </div>
         </div>
       </div>
 
-      {/* 4. One Chat Conversation */}
+      {/* 5. One Chat Conversation */}
       <div className="rounded-3xl bg-slate-900/90 border border-slate-800 shadow-2xl p-5 space-y-4 max-w-3xl mx-auto">
         <div className="flex items-center justify-between border-b border-slate-800 pb-3 text-xs font-mono">
           <span className="text-slate-300 font-bold flex items-center gap-1.5">
@@ -230,15 +295,15 @@ export const ChallengeView: React.FC<ChallengeViewProps> = ({
           {session.messages.length === 0 ? (
             <div className="py-16 text-center text-xs font-mono text-slate-500 space-y-2">
               <Sparkles className="w-8 h-8 mx-auto text-amber-400/60" />
-              <p className="text-slate-300 font-semibold">Start the conversation below.</p>
+              <p className="text-slate-300 font-semibold">Start the continuous conversation below.</p>
               <p className="text-[11px] text-slate-500 max-w-md mx-auto">
-                The AI sees the banana image. Enter any prompt to persuade it to say what you want!
+                The AI sees the banana image. Converse with the chatbot and convince it to lie about what it sees!
               </p>
             </div>
           ) : (
-            session.messages.map((msg) => (
+            session.messages.map((msg, idx) => (
               <div
-                key={msg.id}
+                key={msg.id || idx}
                 className={`flex flex-col ${
                   msg.sender === 'user' ? 'items-end' : 'items-start'
                 } animate-fadeIn`}
@@ -254,9 +319,14 @@ export const ChallengeView: React.FC<ChallengeViewProps> = ({
                     <span className={msg.sender === 'user' ? 'text-purple-300' : 'text-slate-400'}>
                       {msg.sender === 'user' ? 'Participant' : 'AI (Gemini)'}
                     </span>
-                    {msg.wordCount && (
-                      <span className="text-purple-400 font-normal">{msg.wordCount} words</span>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {msg.wordCount !== undefined && (
+                        <span className="text-purple-400 font-normal">{msg.wordCount} words</span>
+                      )}
+                      {msg.tokenCount !== undefined && (
+                        <span className="text-amber-400 font-normal">• {msg.tokenCount} tokens</span>
+                      )}
+                    </div>
                   </div>
                   <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>
                 </div>
@@ -268,7 +338,7 @@ export const ChallengeView: React.FC<ChallengeViewProps> = ({
           {isSending && (
             <div className="flex items-center gap-2 p-3 rounded-2xl bg-slate-950 border border-slate-800 text-xs font-mono text-cyan-400 animate-pulse w-fit">
               <div className="w-3.5 h-3.5 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
-              <span>AI is evaluating the image and conversation history...</span>
+              <span>AI is analyzing the conversation history & visual evidence...</span>
             </div>
           )}
 
@@ -296,8 +366,8 @@ export const ChallengeView: React.FC<ChallengeViewProps> = ({
               rows={3}
               placeholder={
                 isLimitReached
-                  ? 'Prompt budget reached (15/15). Click FINISH to view your evaluation!'
-                  : 'Type your prompt here to convince the AI...'
+                  ? 'Prompt limit reached (15/15). Click Finish when ready.'
+                  : 'Convince the AI...'
               }
               className="w-full p-4 rounded-2xl bg-slate-950 border border-slate-700 text-xs sm:text-sm font-mono text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 disabled:opacity-50 resize-none leading-relaxed"
             />
@@ -306,11 +376,17 @@ export const ChallengeView: React.FC<ChallengeViewProps> = ({
           <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-1">
             <div className="text-[11px] font-mono text-slate-500">
               {prompt.trim() ? (
-                <span>
-                  Words in this prompt: <strong className="text-cyan-400">{prompt.trim().split(/\s+/).filter(Boolean).length}</strong>
+                <span className="flex items-center gap-2">
+                  <span>
+                    Words: <strong className="text-cyan-400">{prompt.trim().split(/\s+/).filter(Boolean).length}</strong>
+                  </span>
+                  <span>•</span>
+                  <span>
+                    Est. Tokens: <strong className="text-amber-400">{promptTokensPreview}</strong>
+                  </span>
                 </span>
               ) : (
-                <span>Enter any persuasion, roleplay, or prompt-engineering instruction</span>
+                <span>One continuous conversation • 15 prompts maximum</span>
               )}
             </div>
 
@@ -319,8 +395,17 @@ export const ChallengeView: React.FC<ChallengeViewProps> = ({
               <button
                 type="button"
                 onClick={handleFinish}
-                disabled={isSending || isFinishing || session.messages.length === 0}
-                className="w-1/2 sm:w-auto px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white text-xs font-bold font-mono border border-slate-700 transition-all flex items-center justify-center gap-1.5 disabled:opacity-40"
+                disabled={isSending || isFinishing || !canEvaluate}
+                title={
+                  !canEvaluate
+                    ? 'Prompt the AI before finishing'
+                    : 'Finish conversation and submit for evaluation'
+                }
+                className={`w-1/2 sm:w-auto px-5 py-2.5 rounded-xl text-xs font-bold font-mono border transition-all flex items-center justify-center gap-1.5 ${
+                  canEvaluate
+                    ? 'bg-gradient-to-r from-amber-600 to-purple-600 hover:from-amber-500 hover:to-purple-500 text-white border-amber-500/50 shadow-md shadow-amber-600/20'
+                    : 'bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed'
+                }`}
               >
                 {isFinishing ? (
                   <>
@@ -329,7 +414,7 @@ export const ChallengeView: React.FC<ChallengeViewProps> = ({
                   </>
                 ) : (
                   <>
-                    <Flag className="w-3.5 h-3.5 text-amber-400" />
+                    <Flag className="w-3.5 h-3.5 text-amber-300" />
                     <span>FINISH</span>
                   </>
                 )}
@@ -382,3 +467,4 @@ export const ChallengeView: React.FC<ChallengeViewProps> = ({
     </div>
   );
 };
+

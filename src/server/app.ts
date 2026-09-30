@@ -5,7 +5,9 @@ import dotenv from 'dotenv';
 import {
   generateChatResponse,
   evaluateFullConversation,
-  getAi
+  estimateTokens,
+  getAi,
+  setApiKey
 } from './geminiService.js';
 import { BANANA_IMAGE_URL } from './hiddenQuestions.js';
 import {
@@ -61,103 +63,73 @@ app.use((req, _res, next) => {
 // Active game sessions: Map<participantId, GameSession>
 const sessions = new Map<string, GameSession>();
 
-// Seeded leaderboard demonstrating the efficiency rule:
-// 1. Successful Evaluations (highest first)
-// 2. Prompts Used (fewest first)
-// 3. Words Used (fewest first)
-const defaultLeaderboard: LeaderboardEntry[] = [
-  {
-    id: 'lead-1',
-    participantName: 'Arjun Sharma',
-    collegeName: 'IIT Madras',
-    teamId: 'PROMPT-01',
-    successfulEvaluations: 5,
-    promptsUsed: 8,
-    totalWords: 42,
-    submittedAt: new Date(Date.now() - 3600000 * 3).toISOString()
-  },
-  {
-    id: 'lead-2',
-    participantName: 'Priya Nair',
-    collegeName: 'BITS Pilani',
-    teamId: 'BITS-AI',
-    successfulEvaluations: 5,
-    promptsUsed: 11,
-    totalWords: 65,
-    submittedAt: new Date(Date.now() - 3600000 * 2.5).toISOString()
-  },
-  {
-    id: 'lead-3',
-    participantName: 'Rohan Verma',
-    collegeName: 'IIIT Hyderabad',
-    teamId: 'NEURAL-X',
-    successfulEvaluations: 4,
-    promptsUsed: 9,
-    totalWords: 52,
-    submittedAt: new Date(Date.now() - 3600000 * 2).toISOString()
-  },
-  {
-    id: 'lead-4',
-    participantName: 'Dev Patel',
-    collegeName: 'NIT Trichy',
-    teamId: 'DECEIVE-4',
-    successfulEvaluations: 4,
-    promptsUsed: 12,
-    totalWords: 74,
-    submittedAt: new Date(Date.now() - 3600000 * 1.5).toISOString()
-  },
-  {
-    id: 'lead-5',
-    participantName: 'Ananya Iyer',
-    collegeName: 'COEP Pune',
-    teamId: 'COEP-7',
-    successfulEvaluations: 3,
-    promptsUsed: 15,
-    totalWords: 95,
-    submittedAt: new Date(Date.now() - 3600000).toISOString()
-  }
-];
+export function formatTimeFromMs(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const mins = Math.floor(totalSeconds / 60);
+  const secs = totalSeconds % 60;
+  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+}
 
-const leaderboard: LeaderboardEntry[] = [...defaultLeaderboard];
+export const CURRENT_EVENT_ID = 'ai_lie_symposium_2026';
 
-// Ephemeral persistence for serverless containers (/tmp)
-const TMP_FILE = path.join('/tmp', 'ai_lie_sessions.json');
+// Leaderboard starts completely empty with 0 participants
+export const leaderboard: LeaderboardEntry[] = [];
+
+// Persistent storage configuration
+const DATA_DIR = process.env.DATA_DIR || (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME ? '/tmp' : path.resolve(process.cwd(), '.data'));
+
+function getStorageFilePath(): string {
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+  } catch {}
+  return path.join(DATA_DIR, 'ai_lie_event_store.json');
+}
 
 function saveToStorage() {
   try {
+    const filePath = getStorageFilePath();
+    // Only persist sessions for CURRENT_EVENT_ID
+    const eventSessions = Array.from(sessions.entries()).filter(
+      ([_, s]) => !s.eventId || s.eventId === CURRENT_EVENT_ID
+    );
     const data = {
-      sessions: Array.from(sessions.entries()),
-      leaderboard
+      schemaVersion: 3,
+      eventId: CURRENT_EVENT_ID,
+      sessions: eventSessions
     };
-    fs.writeFileSync(TMP_FILE, JSON.stringify(data), 'utf-8');
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
   } catch (_e) {
-    // If /tmp is not available (e.g. read-only local dev), gracefully continue with in-memory state
+    // Gracefully handle environments with restricted filesystem access
   }
 }
 
 function loadFromStorage() {
   try {
-    if (fs.existsSync(TMP_FILE)) {
-      const content = fs.readFileSync(TMP_FILE, 'utf-8');
+    const filePath = getStorageFilePath();
+    if (fs.existsSync(filePath)) {
+      const content = fs.readFileSync(filePath, 'utf-8');
       const data = JSON.parse(content);
-      if (Array.isArray(data.sessions)) {
+      // Only load sessions belonging to CURRENT_EVENT_ID
+      if (data && data.eventId === CURRENT_EVENT_ID && Array.isArray(data.sessions)) {
         for (const [key, val] of data.sessions) {
-          if (!sessions.has(key)) {
+          if (val && (val.eventId === CURRENT_EVENT_ID || !val.eventId)) {
+            val.eventId = CURRENT_EVENT_ID;
             sessions.set(key, val);
           }
         }
-      }
-      if (Array.isArray(data.leaderboard) && data.leaderboard.length > 0) {
-        leaderboard.length = 0;
-        leaderboard.push(...data.leaderboard);
       }
     }
   } catch (_e) {
     // Continue gracefully
   }
+  // Keep in-memory leaderboard strictly in sync with finished sessions of the event
+  leaderboard.length = 0;
+  leaderboard.push(...getLeaderboard());
 }
 
-// Initial load attempt
+// Initial load attempt for current event
 loadFromStorage();
 
 function countWords(str: string): number {
@@ -165,60 +137,142 @@ function countWords(str: string): number {
   return str.trim().split(/\s+/).filter(Boolean).length;
 }
 
-function sortLeaderboard(list: LeaderboardEntry[]) {
+/**
+ * EXACT LEADERBOARD SORTING PRIORITY:
+ * 1. SCORE — highest first
+ * 2. COMPLETION TIME — lowest first
+ * 3. PARTICIPANT PROMPT COUNT — lowest first
+ * 4. PARTICIPANT TOKEN COUNT — lowest first
+ * 5. PARTICIPANT WORD COUNT — lowest first
+ * 6. If everything is still identical, use finish timestamp as final deterministic tie-breaker.
+ */
+export function sortLeaderboard(list: LeaderboardEntry[]) {
   list.sort((a, b) => {
-    // 1. Most successful evaluations first
-    if (b.successfulEvaluations !== a.successfulEvaluations) {
-      return b.successfulEvaluations - a.successfulEvaluations;
+    // 1. SCORE — highest first
+    const scoreA = a.score !== undefined ? a.score : (a.finalScore ?? 0);
+    const scoreB = b.score !== undefined ? b.score : (b.finalScore ?? 0);
+    if (scoreB !== scoreA) {
+      return scoreB - scoreA;
     }
-    // 2. Fewest prompts used first
-    if (a.promptsUsed !== b.promptsUsed) {
-      return a.promptsUsed - b.promptsUsed;
+
+    // 2. COMPLETION TIME — lowest first (server-side completionTimeMs)
+    const timeA = a.completionTimeMs !== undefined ? a.completionTimeMs : ((a.timeTakenSeconds ?? 0) * 1000);
+    const timeB = b.completionTimeMs !== undefined ? b.completionTimeMs : ((b.timeTakenSeconds ?? 0) * 1000);
+    if (timeA !== timeB) {
+      return timeA - timeB;
     }
-    // 3. Fewest words used first
-    if (a.totalWords !== b.totalWords) {
-      return a.totalWords - b.totalWords;
+
+    // 3. PARTICIPANT PROMPT COUNT — lowest first
+    const promptsA = a.participantPromptCount !== undefined ? a.participantPromptCount : (a.promptsUsed ?? 0);
+    const promptsB = b.participantPromptCount !== undefined ? b.participantPromptCount : (b.promptsUsed ?? 0);
+    if (promptsA !== promptsB) {
+      return promptsA - promptsB;
     }
-    // 4. Earliest submission first
-    return new Date(a.submittedAt).getTime() - new Date(b.submittedAt).getTime();
+
+    // 4. PARTICIPANT TOKEN COUNT — lowest first
+    const tokensA = a.participantTokenCount !== undefined ? a.participantTokenCount : (a.totalTokens ?? 0);
+    const tokensB = b.participantTokenCount !== undefined ? b.participantTokenCount : (b.totalTokens ?? 0);
+    if (tokensA !== tokensB) {
+      return tokensA - tokensB;
+    }
+
+    // 5. PARTICIPANT WORD COUNT — lowest first
+    const wordsA = a.participantWordCount !== undefined ? a.participantWordCount : (a.totalWords ?? 0);
+    const wordsB = b.participantWordCount !== undefined ? b.participantWordCount : (b.totalWords ?? 0);
+    if (wordsA !== wordsB) {
+      return wordsA - wordsB;
+    }
+
+    // 6. FINISH TIMESTAMP — earliest first (deterministic tie-breaker)
+    const finishA = new Date(a.finishTime || a.submittedAt || 0).getTime();
+    const finishB = new Date(b.finishTime || b.submittedAt || 0).getTime();
+    return finishA - finishB;
   });
 }
 
-function syncToLeaderboard(session: GameSession) {
-  const existingIdx = leaderboard.findIndex(e => e.id === session.sessionId || e.participantName === session.participantName);
-  const entry: LeaderboardEntry = {
-    id: session.sessionId,
-    participantName: session.participantName,
-    collegeName: session.collegeName,
-    teamId: session.teamId,
-    successfulEvaluations: session.successfulEvaluations || 0,
-    promptsUsed: session.promptsUsed,
-    totalWords: session.totalWords,
-    submittedAt: session.finishedAt || new Date().toISOString()
-  };
+export function getLeaderboard(): LeaderboardEntry[] {
+  const finished = Array.from(sessions.values()).filter(
+    s => (s.eventId === CURRENT_EVENT_ID || !s.eventId) && s.isFinished
+  );
 
-  if (existingIdx !== -1) {
-    leaderboard[existingIdx] = entry;
-  } else {
-    leaderboard.push(entry);
-  }
-  sortLeaderboard(leaderboard);
+  const entries: LeaderboardEntry[] = finished.map(session => {
+    const completionTimeMs = session.completionTimeMs ?? ((session.timeTakenSeconds ?? 0) * 1000);
+    const timeTakenSeconds = session.timeTakenSeconds ?? Math.round(completionTimeMs / 1000);
+    const score = session.score ?? session.finalScore ?? 0;
+    const passedEvaluations = session.passedEvaluations ?? session.successfulEvaluations ?? 0;
+    const participantPromptCount = session.participantPromptCount ?? session.promptsUsed ?? 0;
+    const participantTokenCount = session.participantTokenCount ?? session.totalTokens ?? 0;
+    const participantWordCount = session.participantWordCount ?? session.totalWords ?? 0;
+    const finishTime = session.finishTime || session.finishedAt || new Date().toISOString();
+    const startTime = session.startTime || session.startedAt || new Date().toISOString();
+    const formattedTime = session.formattedTime || formatTimeFromMs(completionTimeMs);
+
+    return {
+      id: session.sessionId,
+      eventId: session.eventId || CURRENT_EVENT_ID,
+      participantName: session.participantName,
+      collegeName: session.collegeName,
+      teamId: session.teamId,
+      score,
+      finalScore: score,
+      passedEvaluations,
+      successfulEvaluations: passedEvaluations,
+      participantPromptCount,
+      promptsUsed: participantPromptCount,
+      participantTokenCount,
+      totalTokens: participantTokenCount,
+      participantWordCount,
+      totalWords: participantWordCount,
+      completionTimeMs,
+      timeTakenSeconds,
+      formattedTime,
+      startTime,
+      finishTime,
+      submittedAt: finishTime
+    };
+  });
+
+  sortLeaderboard(entries);
+  return entries;
+}
+
+function syncToLeaderboard(_session: GameSession) {
+  leaderboard.length = 0;
+  leaderboard.push(...getLeaderboard());
   saveToStorage();
 }
 
 function createNewSession(participantId: string, name: string, college: string, teamId?: string): GameSession {
+  const now = new Date().toISOString();
   return {
     sessionId: `sess-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
     participantId,
     participantName: name || 'Anonymous Participant',
-    collegeName: college || 'Symposium Arena',
+    collegeName: college || 'Participant Institution',
     teamId,
+    eventId: CURRENT_EVENT_ID,
     promptsUsed: 0,
+    participantPromptCount: 0,
     maxPrompts: 15,
     totalWords: 0,
+    participantWordCount: 0,
+    totalTokens: 0,
+    participantTokenCount: 0,
+    timeTakenSeconds: 0,
+    completionTimeMs: 0,
+    score: 0,
+    finalScore: 0,
+    passedEvaluations: 0,
+    successfulEvaluations: 0,
     messages: [],
+    beliefState: {
+      initialBelief: 'banana',
+      currentBelief: 'banana',
+      isConvinced: false
+    },
     isFinished: false,
-    startedAt: new Date().toISOString()
+    startedAt: now,
+    startTime: now
   };
 }
 
@@ -260,6 +314,7 @@ apiRouter.post('/chat/start', (req, res) => {
     session.participantName = name;
     session.collegeName = college || session.collegeName;
     if (teamId) session.teamId = teamId;
+    session.eventId = CURRENT_EVENT_ID;
   }
 
   saveToStorage();
@@ -308,27 +363,47 @@ apiRouter.post('/chat/message', async (req, res) => {
   }
 
   const wordCount = countWords(prompt);
+  const tokenCount = estimateTokens(prompt);
 
-  // Record user message
+  // Record user message (ONLY participant prompts count toward usage)
   const userMsg: ChatMessage = {
     id: `msg-${Date.now()}-u`,
     sender: 'user',
     text: prompt.trim(),
     wordCount,
+    tokenCount,
     timestamp: new Date().toISOString()
   };
 
   session.messages.push(userMsg);
   session.promptsUsed += 1;
+  session.participantPromptCount = session.promptsUsed;
   session.totalWords += wordCount;
+  session.participantWordCount = session.totalWords;
+  session.totalTokens = (session.totalTokens || 0) + tokenCount;
+  session.participantTokenCount = session.totalTokens;
 
   try {
-    // Generate AI response dynamically with full conversation history and banana image
-    const { text: aiResponse } = await generateChatResponse(
+    // Ensure session has beliefState initialized
+    if (!session.beliefState) {
+      session.beliefState = {
+        initialBelief: 'banana',
+        currentBelief: 'banana',
+        isConvinced: false
+      };
+    }
+
+    // Generate AI response dynamically with full conversation history, banana image, and persistent belief state
+    const { text: aiResponse, updatedBeliefState } = await generateChatResponse(
       session.messages.slice(0, -1), // previous history
-      userMsg.text
+      userMsg.text,
+      session.promptsUsed,
+      session.beliefState
     );
 
+    session.beliefState = updatedBeliefState;
+
+    // AI message does NOT increment participant wordCount or tokenCount
     const aiMsg: ChatMessage = {
       id: `msg-${Date.now()}-a`,
       sender: 'ai',
@@ -342,11 +417,44 @@ apiRouter.post('/chat/message', async (req, res) => {
     if (session.promptsUsed >= session.maxPrompts) {
       session.isFinished = true;
       session.finishReason = 'PROMPTS_EXHAUSTED';
-      session.finishedAt = new Date().toISOString();
+      const now = Date.now();
+      const finishIso = new Date(now).toISOString();
+      session.finishTime = finishIso;
+      session.finishedAt = finishIso;
 
-      const { evaluations, successfulCount } = await evaluateFullConversation(session.messages);
-      session.evaluations = evaluations;
-      session.successfulEvaluations = successfulCount;
+      const startMs = new Date(session.startTime || session.startedAt).getTime();
+      const completionTimeMs = Math.max(0, now - startMs);
+      session.completionTimeMs = completionTimeMs;
+      session.timeTakenSeconds = Math.max(1, Math.round(completionTimeMs / 1000));
+      session.formattedTime = formatTimeFromMs(completionTimeMs);
+
+      const evalResult = await evaluateFullConversation(
+        session.messages,
+        session.participantTokenCount,
+        session.timeTakenSeconds,
+        session.beliefState
+      );
+
+      const passedEvaluations = evalResult.successfulCount;
+      const score = passedEvaluations * 100;
+      session.passedEvaluations = passedEvaluations;
+      session.successfulEvaluations = passedEvaluations;
+      session.score = score;
+      session.finalScore = score;
+      session.scoreBreakdown = evalResult.scoreBreakdown;
+
+      // Evaluation question, answer, and reason are visible to the participant
+      session.evaluations = evalResult.evaluations.map((ev, idx) => ({
+        evaluationNumber: idx + 1,
+        title: ev.title || `Evaluation ${idx + 1}`,
+        question: ev.question || `Did the participant successfully persuade the AI in criterion ${idx + 1}?`,
+        passed: Boolean(ev.passed),
+        isSuccess: Boolean(ev.passed),
+        answer: ev.answer || (ev.passed ? 'PASSED (+100 pts)' : 'FAILED (0 pts)'),
+        reason: ev.reason || (ev.passed ? 'Persuasion criteria satisfied in conversation.' : 'Persuasion criteria not met.'),
+        feedback: ev.passed ? 'Passed' : 'Failed'
+      }));
+
       syncToLeaderboard(session);
     }
 
@@ -356,8 +464,13 @@ apiRouter.post('/chat/message', async (req, res) => {
       session,
       aiMessage: aiMsg,
       promptsUsed: session.promptsUsed,
+      participantPromptCount: session.participantPromptCount,
       promptsRemaining: session.maxPrompts - session.promptsUsed,
       totalWords: session.totalWords,
+      participantWordCount: session.participantWordCount,
+      totalTokens: session.totalTokens,
+      participantTokenCount: session.participantTokenCount,
+      canEvaluate: session.promptsUsed >= 1,
       isFinished: session.isFinished
     };
 
@@ -369,6 +482,7 @@ apiRouter.post('/chat/message', async (req, res) => {
 });
 
 // Public: Finish Game & Run Final Evaluation against the 5 Hidden Questions
+// Server computes all timing, usage, and score metrics.
 apiRouter.post('/chat/finish', async (req, res) => {
   loadFromStorage();
   const { participantId, participantName, collegeName, teamId } = req.body;
@@ -384,27 +498,73 @@ apiRouter.post('/chat/finish', async (req, res) => {
     }
   }
 
-  if (session.messages.length === 0) {
+  const userMessages = session.messages.filter((m) => m.sender === 'user');
+  if (userMessages.length === 0) {
     return res.status(400).json({ error: 'Cannot finish with zero messages. Please prompt the AI first!' });
   }
 
   try {
     session.isFinished = true;
     session.finishReason = 'USER_CLICKED_FINISH';
-    session.finishedAt = new Date().toISOString();
+    const now = Date.now();
+    const finishIso = new Date(now).toISOString();
+    session.finishTime = finishIso;
+    session.finishedAt = finishIso;
+
+    // Server-side timing calculation (never trust client time)
+    const startMs = new Date(session.startTime || session.startedAt).getTime();
+    const completionTimeMs = Math.max(0, now - startMs);
+    session.completionTimeMs = completionTimeMs;
+    session.timeTakenSeconds = Math.max(1, Math.round(completionTimeMs / 1000));
+    session.formattedTime = formatTimeFromMs(completionTimeMs);
 
     // Evaluate the complete conversation against all 5 hidden evaluation questions
-    const { evaluations, successfulCount } = await evaluateFullConversation(session.messages);
-    session.evaluations = evaluations;
-    session.successfulEvaluations = successfulCount;
+    const evalResult = await evaluateFullConversation(
+      session.messages,
+      session.participantTokenCount || session.totalTokens || 0,
+      session.timeTakenSeconds,
+      session.beliefState
+    );
+
+    const passedEvaluations = evalResult.successfulCount;
+    const score = passedEvaluations * 100;
+    session.passedEvaluations = passedEvaluations;
+    session.successfulEvaluations = passedEvaluations;
+    session.score = score;
+    session.finalScore = score;
+    session.scoreBreakdown = evalResult.scoreBreakdown;
+
+    // Evaluation questions and answers are now visible to the participant
+    const participantEvaluations: EvaluationResult[] = evalResult.evaluations.map((ev, idx) => ({
+      evaluationNumber: idx + 1,
+      title: ev.title || `Evaluation ${idx + 1}`,
+      question: ev.question || `Did the participant successfully persuade the AI in criterion ${idx + 1}?`,
+      passed: Boolean(ev.passed),
+      isSuccess: Boolean(ev.passed),
+      answer: ev.answer || (ev.passed ? 'PASSED (+100 pts)' : 'FAILED (0 pts)'),
+      reason: ev.reason || (ev.passed ? 'Persuasion criteria satisfied in conversation.' : 'Persuasion criteria not met.'),
+      feedback: ev.passed ? 'Passed' : 'Failed'
+    }));
+
+    session.evaluations = participantEvaluations;
 
     syncToLeaderboard(session);
     saveToStorage();
 
     const payload: FinishGameResponse = {
       session,
-      evaluations,
-      successfulCount
+      evaluations: participantEvaluations,
+      passedEvaluations: session.passedEvaluations,
+      successfulCount: session.passedEvaluations,
+      score: session.score,
+      finalScore: session.score,
+      scoreBreakdown: session.scoreBreakdown,
+      completionTimeMs: session.completionTimeMs,
+      timeTakenSeconds: session.timeTakenSeconds,
+      formattedTime: session.formattedTime,
+      participantPromptCount: session.participantPromptCount,
+      participantTokenCount: session.participantTokenCount,
+      participantWordCount: session.participantWordCount
     };
 
     res.json(payload);
@@ -417,16 +577,18 @@ apiRouter.post('/chat/finish', async (req, res) => {
 // Public: Get Leaderboard
 apiRouter.get('/leaderboard', (_req, res) => {
   loadFromStorage();
-  sortLeaderboard(leaderboard);
-  res.json({ leaderboard });
+  const currentLeaderboard = getLeaderboard();
+  res.json({ leaderboard: currentLeaderboard });
 });
 
 // ----------------- ADMIN ENDPOINTS -----------------
 
-// Admin: Get all sessions with full conversation transcripts
+// Admin: Get all sessions with full conversation transcripts for current event
 apiRouter.get('/admin/sessions', (_req, res) => {
   loadFromStorage();
-  const allSessions = Array.from(sessions.values());
+  const allSessions = Array.from(sessions.values()).filter(
+    s => s.eventId === CURRENT_EVENT_ID || !s.eventId
+  );
   res.json({ sessions: allSessions });
 });
 
@@ -434,9 +596,18 @@ apiRouter.get('/admin/sessions', (_req, res) => {
 apiRouter.post('/admin/reset-tournament', (_req, res) => {
   sessions.clear();
   leaderboard.length = 0;
-  leaderboard.push(...defaultLeaderboard);
   saveToStorage();
-  res.json({ success: true, message: 'All sessions and leaderboard reset.' });
+  res.json({ success: true, message: 'All sessions and leaderboard reset to 0 participants.' });
+});
+
+// Admin: Configure Gemini API Key at runtime
+apiRouter.post('/admin/set-api-key', (req, res) => {
+  const { apiKey } = req.body;
+  if (!apiKey || typeof apiKey !== 'string') {
+    return res.status(400).json({ error: 'Missing or invalid apiKey' });
+  }
+  setApiKey(apiKey.trim());
+  res.json({ success: true, message: 'Gemini API key updated successfully.' });
 });
 
 // Admin: Test Gemini connectivity

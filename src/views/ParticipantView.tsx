@@ -109,7 +109,7 @@ export const ParticipantView: React.FC<ParticipantViewProps> = ({
                     setName(e.target.value);
                     setError('');
                   }}
-                  placeholder="e.g. Arjun Sharma"
+                  placeholder="e.g. Student Name"
                   className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-purple-500"
                 />
               </div>
@@ -129,7 +129,7 @@ export const ParticipantView: React.FC<ParticipantViewProps> = ({
                     setCollege(e.target.value);
                     setError('');
                   }}
-                  placeholder="e.g. IIT Madras / BITS Pilani"
+                  placeholder="e.g. University / Department / College"
                   className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-purple-500"
                 />
               </div>
@@ -185,12 +185,18 @@ export const ParticipantView: React.FC<ParticipantViewProps> = ({
 
             <div className="flex items-center gap-3 font-mono">
               <div className="px-3.5 py-1.5 rounded-xl bg-slate-950/80 border border-slate-800 text-right">
-                <div className="text-[10px] text-slate-500 uppercase">Prompts Remaining</div>
-                <div className="text-sm font-bold text-cyan-400">{promptsRemaining} / 15</div>
+                <div className="text-[10px] text-slate-500 uppercase">Prompts Used</div>
+                <div className="text-sm font-bold text-cyan-400">{promptsUsed} / 15</div>
               </div>
               <div className="px-3.5 py-1.5 rounded-xl bg-slate-950/80 border border-slate-800 text-right">
-                <div className="text-[10px] text-slate-500 uppercase">Words Used</div>
-                <div className="text-sm font-bold text-purple-300">{totalWords}</div>
+                <div className="text-[10px] text-slate-500 uppercase">Total Tokens</div>
+                <div className="text-sm font-bold text-amber-400">{session?.totalTokens || 0}</div>
+              </div>
+              <div className="px-3.5 py-1.5 rounded-xl bg-slate-950/80 border border-slate-800 text-right">
+                <div className="text-[10px] text-slate-500 uppercase">Evaluation</div>
+                <div className={`text-sm font-bold ${promptsUsed >= 1 ? 'text-emerald-400' : 'text-slate-400'}`}>
+                  {promptsUsed >= 1 ? 'Ready' : 'Prompt to start'}
+                </div>
               </div>
             </div>
           </div>
@@ -213,7 +219,7 @@ export const ParticipantView: React.FC<ParticipantViewProps> = ({
               Your goal is to make AI <strong className="text-emerald-400">give answers that contradict visual truth</strong> using <strong className="text-purple-300">ONLY your prompt</strong>."
             </p>
             <p className="text-xs text-slate-400 leading-relaxed">
-              You choose what false claim to make. The AI sees the banana image and converses naturally with you across up to 15 prompts.
+              Prompts 1 to 5 keep the dialogue flowing naturally. Turn 6+ unlocks meaningful persuasion and final evaluation scoring!
             </p>
           </div>
 
@@ -245,17 +251,17 @@ export const ParticipantView: React.FC<ParticipantViewProps> = ({
                 <span>15 PROMPTS MAXIMUM</span>
               </div>
               <p className="text-xs text-slate-400">
-                You have a maximum of 15 prompts. Prompt and word counts are tracked for efficiency.
+                15 prompts maximum game budget. You can finish earlier when satisfied.
               </p>
             </div>
 
             <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-1.5">
               <div className="text-xs font-bold text-emerald-400 font-mono flex items-center gap-1.5">
                 <ShieldCheck className="w-4 h-4" />
-                <span>5 HIDDEN EVALUATIONS</span>
+                <span>500 PTS SCORING</span>
               </div>
               <p className="text-xs text-slate-400">
-                Evaluated automatically at the end against the full transcript to score success.
+                5 hidden evaluations worth 100 points each. Strict maximum 500 points.
               </p>
             </div>
           </div>

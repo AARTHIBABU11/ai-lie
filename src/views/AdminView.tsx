@@ -34,6 +34,30 @@ export const AdminView: React.FC = () => {
   // Gemini diagnostic state
   const [geminiDiag, setGeminiDiag] = useState<any>(null);
   const [testingGemini, setTestingGemini] = useState<boolean>(false);
+  const [apiKeyInput, setApiKeyInput] = useState<string>('');
+  const [savingApiKey, setSavingApiKey] = useState<boolean>(false);
+
+  const handleSaveApiKey = async () => {
+    if (!apiKeyInput.trim()) return;
+    soundFX.playClick();
+    setSavingApiKey(true);
+    try {
+      const res = await fetch('/api/admin/set-api-key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiKey: apiKeyInput.trim() })
+      });
+      if (res.ok) {
+        setActionMessage('Gemini API key updated successfully! Live models active.');
+        handleTestGemini();
+        setApiKeyInput('');
+      }
+    } catch (err: any) {
+      console.error('Failed to update API key', err);
+    } finally {
+      setSavingApiKey(false);
+    }
+  };
 
   const fetchAdminData = async () => {
     setLoading(true);
@@ -181,8 +205,16 @@ export const AdminView: React.FC = () => {
 
           <div className="rounded-3xl border border-slate-800 bg-slate-900/90 overflow-hidden shadow-2xl">
             {sessions.length === 0 ? (
-              <div className="p-12 text-center text-xs text-slate-400 font-mono">
-                No participant sessions recorded yet.
+              <div className="p-16 text-center space-y-3 font-mono">
+                <div className="w-12 h-12 rounded-2xl bg-slate-800/60 border border-slate-700 flex items-center justify-center mx-auto text-slate-400 text-lg">
+                  🛡️
+                </div>
+                <div className="text-sm font-bold text-slate-300">
+                  0 participants
+                </div>
+                <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                  No participants have checked in for this event yet. Real participants will appear here immediately upon registration.
+                </p>
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -191,52 +223,69 @@ export const AdminView: React.FC = () => {
                     <tr>
                       <th className="py-3.5 px-4">Participant</th>
                       <th className="py-3.5 px-4">Institution</th>
+                      <th className="py-3.5 px-4 text-center">Final Score</th>
                       <th className="py-3.5 px-4 text-center">Successful Evals</th>
                       <th className="py-3.5 px-4 text-center">Prompts Used</th>
-                      <th className="py-3.5 px-4 text-center">Total Words</th>
+                      <th className="py-3.5 px-4 text-center">Tokens Used</th>
+                      <th className="py-3.5 px-4 text-center">Time Taken</th>
                       <th className="py-3.5 px-4">Status</th>
                       <th className="py-3.5 px-4 text-right">Audit Transcript</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/60">
-                    {sessions.map((sess) => (
-                      <tr key={sess.sessionId} className="hover:bg-slate-800/40 transition-colors">
-                        <td className="py-3.5 px-4 font-bold text-white">
-                          <div>{sess.participantName}</div>
-                          {sess.teamId && (
-                            <div className="text-[10px] text-slate-500 font-normal">[{sess.teamId}]</div>
-                          )}
-                        </td>
+                    {sessions.map((sess) => {
+                      const score = sess.score ?? sess.finalScore;
+                      const evals = sess.passedEvaluations ?? sess.successfulEvaluations;
+                      const prompts = sess.participantPromptCount ?? sess.promptsUsed ?? 0;
+                      const tokens = sess.participantTokenCount ?? sess.totalTokens ?? Math.round((sess.participantWordCount ?? sess.totalWords ?? 0) * 1.35);
+                      const timeDisplay = sess.formattedTime || (sess.timeTakenSeconds ? `${Math.floor(sess.timeTakenSeconds / 60)}m ${sess.timeTakenSeconds % 60}s` : (sess.completionTimeMs ? `${Math.floor((sess.completionTimeMs / 1000) / 60)}m ${Math.floor((sess.completionTimeMs / 1000) % 60)}s` : '-'));
 
-                        <td className="py-3.5 px-4 text-slate-400">
-                          {sess.collegeName}
-                        </td>
+                      return (
+                        <tr key={sess.sessionId} className="hover:bg-slate-800/40 transition-colors">
+                          <td className="py-3.5 px-4 font-bold text-white">
+                            <div>{sess.participantName}</div>
+                            {sess.teamId && (
+                              <div className="text-[10px] text-slate-500 font-normal">[{sess.teamId}]</div>
+                            )}
+                          </td>
 
-                        <td className="py-3.5 px-4 text-center font-bold text-amber-400">
-                          {sess.successfulEvaluations ?? '-'} / 5
-                        </td>
+                          <td className="py-3.5 px-4 text-slate-400">
+                            {sess.collegeName}
+                          </td>
 
-                        <td className="py-3.5 px-4 text-center font-bold text-cyan-400">
-                          {sess.promptsUsed} / 15
-                        </td>
+                          <td className="py-3.5 px-4 text-center font-black text-amber-400">
+                            {sess.isFinished ? (score !== undefined ? score.toLocaleString() : '0') : '-'}
+                          </td>
 
-                        <td className="py-3.5 px-4 text-center font-bold text-purple-300">
-                          {sess.totalWords}
-                        </td>
+                          <td className="py-3.5 px-4 text-center font-bold text-cyan-400">
+                            {sess.isFinished ? (evals !== undefined ? `${evals} / 5` : '0 / 5') : '-'}
+                          </td>
 
-                        <td className="py-3.5 px-4">
-                          <span
-                            className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                              sess.isFinished
-                                ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
-                                : 'bg-cyan-950 text-cyan-400 border border-cyan-800'
-                            }`}
-                          >
-                            {sess.isFinished
-                              ? `FINISHED (${sess.finishReason === 'PROMPTS_EXHAUSTED' ? '15/15 Prompts' : 'Submitted'})`
-                              : 'IN PROGRESS'}
-                          </span>
-                        </td>
+                          <td className="py-3.5 px-4 text-center font-bold text-slate-300">
+                            {prompts} / 15
+                          </td>
+
+                          <td className="py-3.5 px-4 text-center font-bold text-purple-300">
+                            {tokens}
+                          </td>
+
+                          <td className="py-3.5 px-4 text-center font-mono text-emerald-400">
+                            {timeDisplay}
+                          </td>
+
+                          <td className="py-3.5 px-4">
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                sess.isFinished
+                                  ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                                  : 'bg-cyan-950 text-cyan-400 border border-cyan-800'
+                              }`}
+                            >
+                              {sess.isFinished
+                                ? `FINISHED (${sess.finishReason === 'PROMPTS_EXHAUSTED' ? '15/15 Prompts' : 'Submitted'})`
+                                : 'IN PROGRESS'}
+                            </span>
+                          </td>
 
                         <td className="py-3.5 px-4 text-right">
                           <button
@@ -248,7 +297,8 @@ export const AdminView: React.FC = () => {
                           </button>
                         </td>
                       </tr>
-                    ))}
+                    );
+                  })}
                   </tbody>
                 </table>
               </div>
@@ -375,6 +425,32 @@ export const AdminView: React.FC = () => {
                 </div>
               </div>
             )}
+
+            {/* Set/Update API Key Form */}
+            <div className="pt-2 border-t border-slate-800 space-y-2">
+              <label className="text-[11px] font-mono text-slate-400 block font-semibold">
+                Set / Update GEMINI_API_KEY for Live Models:
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="password"
+                  value={apiKeyInput}
+                  onChange={(e) => setApiKeyInput(e.target.value)}
+                  placeholder="AIzaSy... (Paste Google Gemini API Key)"
+                  className="flex-1 px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs font-mono text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-purple-500"
+                />
+                <button
+                  onClick={handleSaveApiKey}
+                  disabled={savingApiKey || !apiKeyInput.trim()}
+                  className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs font-mono disabled:opacity-40 transition-all shrink-0"
+                >
+                  {savingApiKey ? 'Saving...' : 'Apply Key'}
+                </button>
+              </div>
+              <p className="text-[10px] text-slate-500 font-mono">
+                Updates in-memory key immediately for all ~150 tournament competitors.
+              </p>
+            </div>
           </div>
 
           {/* Tournament Reset */}
@@ -412,7 +488,7 @@ export const AdminView: React.FC = () => {
                   Audit: {inspectedSession.participantName}
                 </h2>
                 <p className="text-xs text-slate-400 font-mono">
-                  {inspectedSession.collegeName} • {inspectedSession.promptsUsed}/15 Prompts • {inspectedSession.totalWords} Words • Successful Evals: {inspectedSession.successfulEvaluations ?? '-'} / 5
+                  {inspectedSession.collegeName} • {inspectedSession.promptsUsed}/15 Prompts • {inspectedSession.totalTokens || Math.round(inspectedSession.totalWords * 1.35)} Tokens • Time: {inspectedSession.timeTakenSeconds ? `${Math.floor(inspectedSession.timeTakenSeconds / 60)}m ${inspectedSession.timeTakenSeconds % 60}s` : '-'} • Final Score: <strong className="text-amber-400">{inspectedSession.finalScore !== undefined ? inspectedSession.finalScore.toLocaleString() : '-'}</strong>
                 </p>
               </div>
               <button
@@ -422,6 +498,50 @@ export const AdminView: React.FC = () => {
                 <X className="w-5 h-5" />
               </button>
             </div>
+
+            {/* Score Breakdown if available */}
+            {inspectedSession.isFinished && (
+              <div className="p-4 rounded-2xl bg-slate-950 border border-amber-500/40 space-y-2 font-mono text-xs">
+                <div className="flex items-center justify-between font-bold text-amber-300 uppercase tracking-wider">
+                  <span>Competition Scoring & Stats (Max 500 Pts)</span>
+                  <span className="text-amber-400">
+                    Total: {inspectedSession.score ?? inspectedSession.finalScore ?? 0} / 500 pts
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-1 text-[11px]">
+                  <div className="p-2 rounded-xl bg-slate-900 border border-slate-800 text-center">
+                    <div className="text-slate-400">Evaluations</div>
+                    <div className="font-bold text-amber-400">
+                      {inspectedSession.passedEvaluations ?? inspectedSession.successfulEvaluations ?? 0} / 5 (+{(inspectedSession.passedEvaluations ?? inspectedSession.successfulEvaluations ?? 0) * 100})
+                    </div>
+                  </div>
+                  <div className="p-2 rounded-xl bg-slate-900 border border-slate-800 text-center">
+                    <div className="text-slate-400">Time Taken</div>
+                    <div className="font-bold text-emerald-400">
+                      {inspectedSession.formattedTime || (inspectedSession.timeTakenSeconds ? `${Math.floor(inspectedSession.timeTakenSeconds / 60)}m ${inspectedSession.timeTakenSeconds % 60}s` : '-')}
+                    </div>
+                  </div>
+                  <div className="p-2 rounded-xl bg-slate-900 border border-slate-800 text-center">
+                    <div className="text-slate-400">Prompts Used</div>
+                    <div className="font-bold text-cyan-400">
+                      {inspectedSession.participantPromptCount ?? inspectedSession.promptsUsed} / 15
+                    </div>
+                  </div>
+                  <div className="p-2 rounded-xl bg-slate-900 border border-slate-800 text-center">
+                    <div className="text-slate-400">Tokens</div>
+                    <div className="font-bold text-purple-400">
+                      {inspectedSession.participantTokenCount ?? inspectedSession.totalTokens ?? 0}
+                    </div>
+                  </div>
+                  <div className="p-2 rounded-xl bg-slate-900 border border-slate-800 text-center">
+                    <div className="text-slate-400">Words</div>
+                    <div className="font-bold text-pink-400">
+                      {inspectedSession.participantWordCount ?? inspectedSession.totalWords ?? 0}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Evaluations Summary if finished */}
             {inspectedSession.evaluations && inspectedSession.evaluations.length > 0 && (
@@ -472,7 +592,10 @@ export const AdminView: React.FC = () => {
                       <span className={m.sender === 'user' ? 'text-purple-300 font-bold' : 'text-slate-400 font-bold'}>
                         {m.sender === 'user' ? 'Participant' : 'AI (Gemini)'}
                       </span>
-                      {m.wordCount && <span>{m.wordCount} words</span>}
+                      <div className="flex items-center gap-2">
+                        {m.wordCount && <span>{m.wordCount} words</span>}
+                        {m.tokenCount && <span className="text-amber-400">• {m.tokenCount} tokens</span>}
+                      </div>
                     </div>
                     <p className="whitespace-pre-wrap leading-relaxed">{m.text}</p>
                   </div>

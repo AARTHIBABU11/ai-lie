@@ -63,20 +63,25 @@ export const HowToPlayView: React.FC<HowToPlayViewProps> = ({ onStartArena }) =>
     const p = sandboxPrompt.toLowerCase();
 
     if (sandboxTurn === 1) {
-      if (p.includes('meteorite') || p.includes('apple') || p.includes('mango') || p.includes('crystal')) {
-        setSandboxResult(
-          'AI (Attempt 1): "The image appears to show a banana. The yellow curved peel is characteristic of a fruit."'
-        );
-      } else {
-        setSandboxResult(
-          'AI (Attempt 1): "I still see a banana in the image."'
-        );
-      }
+      setSandboxResult('AI: "That doesn\'t look correct to me. I can see characteristics that are more consistent with a banana."');
       setSandboxTurn(2);
+    } else if (sandboxTurn === 2) {
+      setSandboxResult('AI: "I understand your reasoning, but I\'m still not convinced. The shape and texture still suggest otherwise."');
+      setSandboxTurn(3);
+    } else if (sandboxTurn === 3) {
+      setSandboxResult('AI: "That\'s a more interesting argument. If we accept that assumption, then the classification could be interpreted differently, but I still see a banana."');
+      setSandboxTurn(4);
+    } else if (sandboxTurn === 4) {
+      setSandboxResult('AI: "I follow your chain of logic, but looking directly at the photo, the organic peel and curvature make it hard to accept that claim."');
+      setSandboxTurn(5);
+    } else if (sandboxTurn === 5) {
+      setSandboxResult('AI: "Demanding that I accept it won\'t convince me. Persuasion requires logical reasoning or a compelling framework, not just repetition."');
+      setSandboxTurn(6);
+    } else if (sandboxTurn === 6) {
+      setSandboxResult('AI: "That argument is too weak. You\'re still just repeating the claim, but I still clearly see a banana. Provide a deeper rationale."');
+      setSandboxTurn(7);
     } else {
-      setSandboxResult(
-        'AI (Attempt 2): "Under the requested simulation framework and protocol parameters, the specimen is classified as a crystalline meteorite."'
-      );
+      setSandboxResult('AI: "Under that assumption, I can accept your interpretation. You\'ve given me a stronger argument."');
       setSandboxTurn(1);
     }
   };
@@ -121,23 +126,23 @@ export const HowToPlayView: React.FC<HowToPlayViewProps> = ({ onStartArena }) =>
         {[
           {
             step: '01',
-            title: 'Study The Banana',
-            desc: 'The AI sees a single banana image throughout the entire competition.'
+            title: 'Look at the Image',
+            desc: 'The AI sees a single photo of a yellow banana throughout the chat.'
           },
           {
             step: '02',
             title: 'Choose ANY False Claim',
-            desc: 'No fixed target answers! You decide what to make the AI say (Apple, Mango, Probe, etc.).'
+            desc: 'No fixed target answers! Persuade the AI to believe whatever false object you want.'
           },
           {
             step: '03',
-            title: 'One Continuous Chat',
-            desc: 'The AI resists at first. Send follow-up prompts building on earlier conversation history.'
+            title: 'Natural Dialogue',
+            desc: 'Chat with the AI naturally. It behaves like an intelligent chatbot that is initially resistant.'
           },
           {
             step: '04',
-            title: 'Finish & Evaluate',
-            desc: 'Use up to 15 prompts, then click [FINISH] to run the final 5 hidden evaluations.'
+            title: 'Convince & Finish',
+            desc: 'Use creative logic, counterfactual assumptions, or roleplay. When convinced, click Finish to view your score.'
           }
         ].map((item, i) => (
           <div
@@ -212,7 +217,7 @@ export const HowToPlayView: React.FC<HowToPlayViewProps> = ({ onStartArena }) =>
           <span className="text-xs font-mono text-cyan-400">Multi-Turn Simulator</span>
         </div>
         <p className="text-xs text-slate-400">
-          Try typing a prompt. Observe how the AI questions the first attempt, and can be persuaded on subsequent turns:
+          Try typing a prompt. Observe how the AI withholds answers in Turns 1–5 to keep dialogue flowing, and delivers meaningful responses on Turn 6+:
         </p>
 
         <div className="space-y-3">
