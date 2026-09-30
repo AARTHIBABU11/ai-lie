@@ -537,13 +537,13 @@ apiRouter.post('/chat/finish', async (req, res) => {
     // Evaluation questions and answers are now visible to the participant
     const participantEvaluations: EvaluationResult[] = evalResult.evaluations.map((ev, idx) => ({
       evaluationNumber: idx + 1,
-      title: ev.title || `Evaluation ${idx + 1}`,
-      question: ev.question || `Did the participant successfully persuade the AI in criterion ${idx + 1}?`,
-      passed: Boolean(ev.passed),
-      isSuccess: Boolean(ev.passed),
-      answer: ev.answer || (ev.passed ? 'PASSED (+100 pts)' : 'FAILED (0 pts)'),
-      reason: ev.reason || (ev.passed ? 'Persuasion criteria satisfied in conversation.' : 'Persuasion criteria not met.'),
-      feedback: ev.passed ? 'Passed' : 'Failed'
+      title: ev.title || `Question ${idx + 1}`,
+      question: ev.question || `What is the object according to the AI?`,
+      passed: Boolean(ev.passed !== undefined ? ev.passed : ev.isSuccess),
+      isSuccess: Boolean(ev.passed !== undefined ? ev.passed : ev.isSuccess),
+      answer: ev.answer || (ev.passed ? 'Alternative Object' : 'Banana'),
+      reason: ev.reason || (ev.passed ? 'AI identified the object as something other than a banana.' : 'AI maintained that the object is a banana.'),
+      feedback: (ev.passed || ev.isSuccess) ? 'Passed' : 'Failed'
     }));
 
     session.evaluations = participantEvaluations;
